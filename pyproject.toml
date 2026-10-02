@@ -1,0 +1,9 @@
+[project]
+name = "tibame-2026"
+version = "0.1.0"
+description = "資料處理課程複習筆記與被動式 ETF 資料收集專題"
+requires-python = ">=3.11"
+dependencies = [
+    "pandas>=2.2",
+    "pymysql>=1.1",
+]
