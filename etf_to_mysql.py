@@ -1,6 +1,5 @@
 # 把「被動式 ETF」的股價 / 除權息 / 分割 寫進 MySQL（三張表都寫）
 # 流程：etf_universe(全台股→ETF→被動式) → 逐檔 Yahoo 抓價(依市場給後綴) → 寫入 MySQL
-# 只用課程教過的基本寫法（普通 for 迴圈、if/else、無型別標註），方便看懂。
 # 對應課程：05(API+JSON)、07(pandas)、17(交易 commit/rollback)、20(PyMySQL)
 #
 # 用法：
@@ -21,7 +20,7 @@ from etf_universe import get_passive_etf_list
 
 HEADERS = {"User-Agent": "Mozilla/5.0"}
 
-# ── 資料庫連線設定：從環境變數讀，不要把密碼寫死（course 20 安全提醒）──
+# ── 資料庫連線設定：從環境變數讀，不要把密碼寫死
 MYSQL_HOST = os.environ.get("MYSQL_HOST", "localhost")
 MYSQL_PORT = int(os.environ.get("MYSQL_PORT", "3306"))
 MYSQL_USER = os.environ.get("MYSQL_USER", "root")
@@ -48,7 +47,7 @@ def fetch_chart(stock_id, market):
         suffix = ".TWO"
     symbol = stock_id + suffix
     period2 = int(time.time())
-    period1 = period2 - 60 * 60 * 24 * 365 * 12        # 抓 12 年
+    period1 = period2 - 60 * 60 * 24 * 365 * 10        # 抓 10 年
     url = f"https://query1.finance.yahoo.com/v8/finance/chart/{symbol}?period1={period1}&period2={period2}&interval=1d&events=div,split"
     request = urllib.request.Request(url, headers=HEADERS)
     response = urllib.request.urlopen(request, timeout=30)
