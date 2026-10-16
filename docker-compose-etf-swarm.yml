@@ -8,15 +8,15 @@ version: "3.8"
 
 services:
   etf_crawler:
-    # ⚠ mark0403 請改成你自己的 Docker Hub 帳號
-    image: mark0403/etf-crawler:${DOCKER_IMAGE_VERSION:-0.0.1}
+    # ⚠ your-dockerhub-account 請改成你自己的 Docker Hub 帳號
+    image: your-dockerhub-account/etf-crawler:${DOCKER_IMAGE_VERSION:-0.0.1}
     environment:
       MYSQL_HOST: mysql            # 同一 overlay 內網，用服務名稱連線（course 26）
       MYSQL_PORT: "3306"
       MYSQL_USER: root
       MYSQL_PASSWORD: ${MYSQL_PASSWORD}
       MYSQL_DB: etf
-      ETF_LIST_DB: stock           # 讀組員 athlan 的 stock.etf_list
+      ETF_LIST_DB: stock           # 讀組員 的 stock.etf_list
       ETF_LIST_TABLE: etf_list
     networks:
       - my_swarm_network

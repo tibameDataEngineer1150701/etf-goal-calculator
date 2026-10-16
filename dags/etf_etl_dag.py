@@ -12,7 +12,7 @@ from airflow.providers.docker.operators.docker import DockerOperator
 from docker.types import Mount
 
 default_args = {
-    "owner": "mark0403",
+    "owner": "your-dockerhub-account",
     "retries": 1,
     "retry_delay": timedelta(minutes=5),
 }
@@ -29,8 +29,8 @@ with DAG(
 
     run_etf_crawler = DockerOperator(
         task_id="run_etf_crawler",
-        # ⚠ mark0403 請改成你自己的 Docker Hub image
-        image="mark0403/etf-crawler:0.0.1",
+        # ⚠ your-dockerhub-account 請改成你自己的 Docker Hub image
+        image="your-dockerhub-account/etf-crawler:0.0.1",
         auto_remove=True,
         # 用 image 的預設 CMD（etf_to_mysql.py）；command 留空即可
         environment={
@@ -39,7 +39,7 @@ with DAG(
             "MYSQL_USER": "root",
             "MYSQL_PASSWORD": "{{ var.value.mysql_password }}",  # 在 Airflow Variables 設定
             "MYSQL_DB": "etf",
-            "ETF_LIST_DB": "stock",         # 讀組員 athlan 的 stock.etf_list
+            "ETF_LIST_DB": "stock",         # 讀組員 的 stock.etf_list
             "ETF_LIST_TABLE": "etf_list",
         },
         network_mode="my_swarm_network",    # 跟 mysql 同一 overlay 內網

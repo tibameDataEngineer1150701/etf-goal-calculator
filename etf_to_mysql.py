@@ -1,5 +1,5 @@
 # 把「被動式 ETF」的股價 / 除權息 / 分割 寫進 MySQL（三張表都寫）
-# 流程：讀 stock.etf_list(組員 athlan 篩好的清單) → 逐檔 Yahoo 抓價(依市場給後綴) → 寫入 MySQL
+# 流程：讀 stock.etf_list(組員 篩好的清單) → 逐檔 Yahoo 抓價(依市場給後綴) → 寫入 MySQL
 #   （若讀不到 DB 清單，會自動改用 etf_universe 現抓 FinMind 當備援）
 # 只用課程教過的基本寫法（普通 for 迴圈、if/else、無型別標註），方便看懂。
 # 對應課程：05(API+JSON)、07(pandas)、17(交易 commit/rollback)、20(PyMySQL)
@@ -28,7 +28,7 @@ MYSQL_USER = os.environ.get("MYSQL_USER", "root")
 MYSQL_PASSWORD = os.environ.get("MYSQL_PASSWORD", "")
 MYSQL_DB = os.environ.get("MYSQL_DB", "etf")
 
-# ── ETF 清單來源：組員 athlan 的 stock.etf_list（已篩好的被動式 ETF 清單）──
+# ── ETF 清單來源：組員 的 stock.etf_list（已篩好的被動式 ETF 清單）──
 ETF_LIST_DB = os.environ.get("ETF_LIST_DB", "stock")
 ETF_LIST_TABLE = os.environ.get("ETF_LIST_TABLE", "etf_list")
 
@@ -39,7 +39,7 @@ def get_conn():
 
 
 def get_etf_list_from_db():
-    # 直接讀組員 athlan 寫好的被動式 ETF 清單（stock.etf_list），只取代碼與市場
+    # 直接讀組員 寫好的被動式 ETF 清單（stock.etf_list），只取代碼與市場
     conn = get_conn()
     try:
         with conn.cursor() as cur:
@@ -148,7 +148,7 @@ def save_splits(df):
 
 
 def main():
-    # 優先讀 athlan 的 stock.etf_list；讀不到才改用 etf_universe 現抓 FinMind（備援）
+    # 優先讀 組員 的 stock.etf_list；讀不到才改用 etf_universe 現抓 FinMind（備援）
     try:
         etfs = get_etf_list_from_db()
         print(f"從 {ETF_LIST_DB}.{ETF_LIST_TABLE} 讀到 {len(etfs)} 檔 ETF 清單")

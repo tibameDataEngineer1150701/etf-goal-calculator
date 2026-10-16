@@ -1,7 +1,7 @@
 # 目標試算：ETF 報酬 + 六都房價 → 「每月投入 X → 10 年後能否付頭期款」
 # 資料來源：
 #   - ETF 報酬：讀本專案 MySQL 的 etf_price（adj_close）→ 算含息年化報酬 CAGR
-#   - 六都房價：目前用「參數」帶入（等組員 rchingyun 的實價登錄金額出來再填）
+#   - 六都房價：目前用「參數」帶入（等組員 的實價登錄金額出來再填）
 # 只用課程教過的基本寫法（for/if、無型別標註），方便看懂。
 #
 # 用法：
@@ -27,7 +27,7 @@ MONTHLY_INVEST = float(os.environ.get("MONTHLY_INVEST", "0"))             # 每�
 CONSERVATIVE_RETURN = float(os.environ.get("CONSERVATIVE_RETURN", "0.07"))  # 保守年化報酬(對照用)
 
 # ⚠ 六都房價（總價，單位：萬元）——目前為「粗估佔位值」，
-#    請改成組員 rchingyun 實價登錄分析出來的實際數字！
+#    請改成組員 實價登錄分析出來的實際數字！
 SIX_CITIES_PRICE_WAN = {
     "台北市": 2500,
     "新北市": 1500,
@@ -182,7 +182,7 @@ def main():
             ok_cons = "可付" if fv_cons >= target else "不足"
             print(f"  {city}：頭期款 {target:,.0f} 元 → @{name} {ok_main} / @保守 {ok_cons}")
 
-    print("\n⚠ 六都房價為佔位參數，請改成 rchingyun 實價登錄的實際數字（程式最上方 SIX_CITIES_PRICE_WAN）。")
+    print("\n⚠ 六都房價為佔位參數，請改成 組員 實價登錄的實際數字（程式最上方 SIX_CITIES_PRICE_WAN）。")
 
 
 if __name__ == "__main__":
