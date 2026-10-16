@@ -1,0 +1,8 @@
+# 不要把這些放進 Docker build context（讓 image 更小、build 更快）
+.git/
+.venv/
+__pycache__/
+*.pyc
+*.csv
+notes/
+.vscode/

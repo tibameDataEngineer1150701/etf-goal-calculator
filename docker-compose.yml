@@ -1,0 +1,42 @@
+# 一鍵起「MySQL + 抓價入庫程式」（對應課程 12 Docker-Compose / network）
+# 用法：
+#   docker compose up --build          # 建 image、起 MySQL、跑抓價入庫
+#   docker compose down                # 關閉（加 -v 連資料一起刪）
+#
+# MySQL 會自動載入 project/schema.sql 建表；crawler 會等 MySQL 健康後才開始寫入。
+
+services:
+  mysql:
+    image: mysql:8
+    environment:
+      MYSQL_ROOT_PASSWORD: rootpass
+      MYSQL_DATABASE: etf
+    ports:
+      - "3306:3306"
+    volumes:
+      # 第一次啟動時自動執行，用來建表
+      - ./project/schema.sql:/docker-entrypoint-initdb.d/schema.sql:ro
+      - mysql_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-prootpass"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  crawler:
+    build: .                      # 用同層的 Dockerfile 建 image
+    # 若要改用 Docker Hub 上已 push 的 image，改成下面這行（並註解掉 build）：
+    # image: mark0403/etf-crawler:0.0.1   # ⚠ mark0403 請改成你自己的 Docker Hub 帳號
+    depends_on:
+      mysql:
+        condition: service_healthy   # 等 MySQL 準備好
+    environment:
+      MYSQL_HOST: mysql              # 用「服務名稱」連線（同一 docker 內網，course 12）
+      MYSQL_PORT: "3306"
+      MYSQL_USER: root
+      MYSQL_PASSWORD: rootpass
+      MYSQL_DB: etf
+      # ETF_LIMIT: "15"              # 想先小量測試就把這行打開
+
+volumes:
+  mysql_data:
