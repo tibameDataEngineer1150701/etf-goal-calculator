@@ -1,7 +1,6 @@
 # 全台股標的 → 篩選 ETF → 篩選被動式（產生「收錄清單」）
 # 資料來源：FinMind TaiwanStockInfo（回傳 JSON，含每檔的分類 industry_category）
-# 對應課程：05(API+JSON)、07(pandas)
-# 用法： uv run python project/etf_universe.py   → 產生 passive_etf_list.csv
+# 用法： uv run python etf_universe.py   → 產生 passive_etf_list.csv
 #
 # 篩選規則（被動式 = 追蹤指數的原型 ETF）：
 #   排除 槓桿型(代號結尾 L)、反向型(結尾 R)、主動式(結尾 A 或名稱含「主動」)

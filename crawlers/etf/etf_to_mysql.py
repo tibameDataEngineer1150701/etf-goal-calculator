@@ -1,6 +1,6 @@
 # 把「被動式 ETF」的股價 / 除權息 / 分割 寫進 MySQL（三張表都寫）
-# 流程：etf_universe(全台股→ETF→被動式) → 逐檔 Yahoo 抓價(依市場給後綴) → 寫入 MySQL
-# 對應課程：05(API+JSON)、07(pandas)、17(交易 commit/rollback)、20(PyMySQL)
+# 流程：讀 stock.etf_list(組員 篩好的清單) → 逐檔 Yahoo 抓價(依市場給後綴) → 寫入 MySQL
+#   （若讀不到 DB 清單，會自動改用 etf_universe 現抓 FinMind 當備援）
 #
 # 用法：
 #   uv sync
@@ -16,21 +16,37 @@ import datetime
 import urllib.request
 import pandas as pd
 import pymysql
-from etf_universe import get_passive_etf_list
 
 HEADERS = {"User-Agent": "Mozilla/5.0"}
 
-# ── 資料庫連線設定：從環境變數讀，不要把密碼寫死
+# ── 資料庫連線設定：從環境變數讀，不要把密碼寫死 ──
 MYSQL_HOST = os.environ.get("MYSQL_HOST", "localhost")
 MYSQL_PORT = int(os.environ.get("MYSQL_PORT", "3306"))
 MYSQL_USER = os.environ.get("MYSQL_USER", "root")
 MYSQL_PASSWORD = os.environ.get("MYSQL_PASSWORD", "")
 MYSQL_DB = os.environ.get("MYSQL_DB", "etf")
 
+# ── ETF 清單來源：組員 的 stock.etf_list（已篩好的被動式 ETF 清單）──
+ETF_LIST_DB = os.environ.get("ETF_LIST_DB", "stock")
+ETF_LIST_TABLE = os.environ.get("ETF_LIST_TABLE", "etf_list")
+
 
 def get_conn():
     return pymysql.connect(host=MYSQL_HOST, port=MYSQL_PORT, user=MYSQL_USER,
                            password=MYSQL_PASSWORD, database=MYSQL_DB, charset="utf8mb4")
+
+
+def get_etf_list_from_db():
+    # 直接讀組員 寫好的被動式 ETF 清單（stock.etf_list），只取代碼與市場
+    conn = get_conn()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(f"select stock_id, market from `{ETF_LIST_DB}`.`{ETF_LIST_TABLE}` order by stock_id")
+            rows = cur.fetchall()
+    finally:
+        conn.close()
+    # rows 是 tuple 清單：(stock_id, market)
+    return [{"stock_id": r[0], "market": r[1]} for r in rows]
 
 
 def get_date_text(unix_seconds):
@@ -47,7 +63,7 @@ def fetch_chart(stock_id, market):
         suffix = ".TWO"
     symbol = stock_id + suffix
     period2 = int(time.time())
-    period1 = period2 - 60 * 60 * 24 * 365 * 10        # 抓 10 年
+    period1 = period2 - 60 * 60 * 24 * 365 * 12        # 抓 12 年
     url = f"https://query1.finance.yahoo.com/v8/finance/chart/{symbol}?period1={period1}&period2={period2}&interval=1d&events=div,split"
     request = urllib.request.Request(url, headers=HEADERS)
     response = urllib.request.urlopen(request, timeout=30)
@@ -130,7 +146,14 @@ def save_splits(df):
 
 
 def main():
-    etfs = get_passive_etf_list()       # [{stock_id, stock_name, market}, ...]
+    # 優先讀 組員 的 stock.etf_list；讀不到才改用 etf_universe 現抓 FinMind（備援）
+    try:
+        etfs = get_etf_list_from_db()
+        print(f"從 {ETF_LIST_DB}.{ETF_LIST_TABLE} 讀到 {len(etfs)} 檔 ETF 清單")
+    except Exception as err:
+        print("讀資料庫清單失敗，改用 etf_universe 現抓 FinMind：", str(err)[:80])
+        from etf_universe import get_passive_etf_list
+        etfs = get_passive_etf_list()   # [{stock_id, stock_name, market}, ...]
 
     limit = os.environ.get("ETF_LIMIT") # 測試時可只跑前 N 檔
     if limit:
@@ -163,4 +186,6 @@ def main():
         print("失敗", len(failed), "檔：", failed)
 
 
-main()
+# 只有「直接執行這個檔」時才跑 main()；被 etf_tasks/etf_producer/etf_scheduler import 時不會自動執行
+if __name__ == "__main__":
+    main()
