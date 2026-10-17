@@ -48,7 +48,7 @@ export ETF_LIMIT=15                      # （可選）先小量測試
 uv run python etf_to_mysql.py            # 不設 ETF_LIMIT 就跑全部被動式 ETF
 ```
 
-## Docker（course 12）
+## Docker
 
 ```bash
 docker compose up --build                # 一鍵：起 MySQL（自動建表）+ 抓價入庫
