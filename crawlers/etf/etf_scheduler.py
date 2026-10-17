@@ -1,5 +1,5 @@
-# 簡易版定時更新（apscheduler）— 對應課程 21
-# 若還沒把 Airflow/Swarm 架好，可先用這支達成作業要求「專題 MySQL 資料自動定期更新」。
+# 簡易版定時更新（apscheduler）
+# 若還沒把 Airflow / Swarm 架好，可先用這支讓 MySQL 的 ETF 資料定時更新。
 # 需要套件： uv add apscheduler loguru
 # 用法：
 #   export MYSQL_HOST=... MYSQL_USER=... MYSQL_PASSWORD=... MYSQL_DB=etf ETF_LIST_DB=stock

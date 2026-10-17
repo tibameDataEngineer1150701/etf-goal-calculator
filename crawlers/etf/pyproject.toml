@@ -1,7 +1,7 @@
 [project]
-name = "tibame-2026"
+name = "etf-crawler"
 version = "0.1.0"
-description = "資料處理課程複習筆記與被動式 ETF 資料收集專題"
+description = "被動式 ETF 資料收集與目標試算"
 requires-python = ">=3.11"
 dependencies = [
     "celery>=5.6.3",

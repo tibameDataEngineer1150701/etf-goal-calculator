@@ -2,7 +2,6 @@
 # 資料來源：
 #   - ETF 報酬：讀本專案 MySQL 的 etf_price（adj_close）→ 算含息年化報酬 CAGR
 #   - 六都房價：目前用「參數」帶入（等組員 的實價登錄金額出來再填）
-# 只用課程教過的基本寫法（for/if、無型別標註），方便看懂。
 #
 # 用法：
 #   export MYSQL_HOST=localhost MYSQL_USER=帳號 MYSQL_PASSWORD=密碼 MYSQL_DB=etf

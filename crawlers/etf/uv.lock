@@ -388,7 +388,7 @@ wheels = [
 ]
 
 [[package]]
-name = "tibame-2026"
+name = "etf-crawler"
 version = "0.1.0"
 source = { virtual = "." }
 dependencies = [

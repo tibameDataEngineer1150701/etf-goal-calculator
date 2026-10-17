@@ -1,4 +1,4 @@
--- 被動式 ETF 資料庫結構（對應課程 15~20：DDL / DML / PyMySQL）
+-- 被動式 ETF 資料庫結構
 -- 用法：
 --   CREATE DATABASE IF NOT EXISTS etf DEFAULT CHARACTER SET utf8mb4;
 --   USE etf;

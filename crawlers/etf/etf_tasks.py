@@ -1,5 +1,4 @@
 # ETF 分散式爬蟲 — 任務定義（tasks）
-# 對應課程 14（@app.task 註冊任務）
 # 工人收到 crawl_one(stock_id, market) → 抓 Yahoo → 寫進 MySQL（重用 etf_to_mysql 的函式）
 
 from etf_worker import app

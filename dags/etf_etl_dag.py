@@ -1,9 +1,6 @@
-# Airflow DAG：每天定時更新專題 ETF 資料（讓 MySQL 自動定期更新）
-# 對應課程 28（Airflow / DockerOperator）；滿足作業「建立 DAG + 專題 MySQL 資料自動定期更新」
-#
-# 放置位置：Airflow 的 dags/ 資料夾（例如課程 dataflow repo 的 dags/）
-# 說明：用 DockerOperator 跑「你自己 build 並 push 到 Docker Hub 的 ETF image」，
-#       image 的預設 CMD 就是 etf_to_mysql.py（讀 stock.etf_list → 抓價 → 寫 etf_price）。
+# Airflow DAG：每天定時更新 ETF 資料
+# 用 DockerOperator 跑已 push 到 Docker Hub 的 ETF image。
+# image 的預設 CMD 是 etf_to_mysql.py（讀 stock.etf_list → 抓價 → 寫 etf_price）。
 
 from datetime import datetime, timedelta
 

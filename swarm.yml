@@ -1,0 +1,33 @@
+# ETF 抓價入庫 — Docker Swarm
+# 用法：
+#   docker network create --scope=swarm --driver=overlay my_swarm_network   # 若尚未建立
+#   DOCKER_IMAGE_VERSION=0.0.1 docker stack deploy --with-registry-auth -c swarm.yml etf
+# mysql、rabbitmq 等共用服務由團隊環境另外部署；本檔只放 ETF 爬蟲，用服務名稱連 mysql。
+
+version: "3.8"
+
+services:
+  etf_crawler:
+    # your-dockerhub-account 請改成自己的 Docker Hub 帳號
+    image: your-dockerhub-account/etf-crawler:${DOCKER_IMAGE_VERSION:-0.0.1}
+    environment:
+      MYSQL_HOST: mysql
+      MYSQL_PORT: "3306"
+      MYSQL_USER: root
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD}
+      MYSQL_DB: etf
+      ETF_LIST_DB: stock           # 讀 stock.etf_list
+      ETF_LIST_TABLE: etf_list
+    networks:
+      - my_swarm_network
+    deploy:
+      replicas: 1
+      restart_policy:
+        condition: none            # 一次性 ETL：抓完寫完就結束（由 Airflow 定時觸發）
+      placement:
+        constraints:
+          - node.labels.etf_crawler == true
+
+networks:
+  my_swarm_network:
+    external: true

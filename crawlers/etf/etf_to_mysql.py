@@ -1,8 +1,6 @@
 # 把「被動式 ETF」的股價 / 除權息 / 分割 寫進 MySQL（三張表都寫）
 # 流程：讀 stock.etf_list(組員 篩好的清單) → 逐檔 Yahoo 抓價(依市場給後綴) → 寫入 MySQL
 #   （若讀不到 DB 清單，會自動改用 etf_universe 現抓 FinMind 當備援）
-# 只用課程教過的基本寫法（普通 for 迴圈、if/else、無型別標註），方便看懂。
-# 對應課程：05(API+JSON)、07(pandas)、17(交易 commit/rollback)、20(PyMySQL)
 #
 # 用法：
 #   uv sync
@@ -21,7 +19,7 @@ import pymysql
 
 HEADERS = {"User-Agent": "Mozilla/5.0"}
 
-# ── 資料庫連線設定：從環境變數讀，不要把密碼寫死（course 20 安全提醒）──
+# ── 資料庫連線設定：從環境變數讀，不要把密碼寫死 ──
 MYSQL_HOST = os.environ.get("MYSQL_HOST", "localhost")
 MYSQL_PORT = int(os.environ.get("MYSQL_PORT", "3306"))
 MYSQL_USER = os.environ.get("MYSQL_USER", "root")
