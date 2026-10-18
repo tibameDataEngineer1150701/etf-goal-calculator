@@ -113,36 +113,89 @@ uv sync
 
 ## 執行方式
 
-### 1. 啟動 MySQL、phpMyAdmin 與抓價
+先裝好 Docker Desktop、Python 3.11 和 [uv](https://docs.astral.sh/uv/)。**3306**、**8080**、**5000** 要是空的。不要另外啟動 `crawlers/housing` 或 `crawlers/finmind` 裡的 `mysql.yml`，那兩個檔也會佔用 3306。
 
-在專案根目錄：
+下面指令在專案根目錄執行。第 3 步要先進入 `crawlers/stock`。
+
+### 1. 下載專案
+
+Clone 只會拿到程式。股價、ETF 清單和 Redash 圖表都在各自的資料庫裡，不會跟著 Git 下來。
 
 ```bash
-docker compose -f docker/docker-compose.yml up --build
+git clone https://github.com/tibameDataEngineer1150701/etf-goal-calculator.git
+cd etf-goal-calculator
 ```
 
-第一次啟動會載入 `crawlers/etf/schema.sql`。phpMyAdmin：http://localhost:8080 （`root` / `rootpass`）。
+### 2. 先啟動 MySQL 和 phpMyAdmin
 
-`stock.etf_list` 要先有資料，抓價才會用組員清單。清單程式在 `crawlers/stock`，寫入前需已有 `stock` 資料庫與 `etf_list` 表。
+這一步只開資料庫和看資料的網頁，先不抓股價。第一次啟動會執行 `crawlers/etf/schema.sql`，建好 `etf` 的表、空的 `stock.etf_list`，以及 `housing.city_house_price` 的 2026Q3 六都總價。
 
-### 2. 重跑頭期款試算
+空的清單去抓價不會寫進任何一檔。所以等清單寫入之後，再做第 4 步。
 
-MySQL 已在跑時，於專案根目錄：
+```bash
+docker compose -f docker/docker-compose.yml up -d --build mysql phpmyadmin
+```
+
+瀏覽器開 http://localhost:8080 ，帳號 `root`，密碼 `rootpass`。看得到 `etf`、`stock`、`housing` 就代表這一步完成。
+
+### 3. 把 ETF 清單寫進 MySQL
+
+抓價程式讀的是 `stock.etf_list` 的 `stock_id` 和 `market`。這支程式在 `crawlers/stock`，會向 FinMind 要清單、篩掉主動式和槓桿反向，再寫進 MySQL。它預設連 3307，所以要用環境變數改到本機這套 MySQL。
+
+```bash
+cd crawlers/stock
+uv sync
+export MYSQL_HOST=127.0.0.1 MYSQL_PORT=3306 MYSQL_USER=root MYSQL_DATABASE=stock
+uv run python -m crawler.save_etf_list
+```
+
+畫面上問密碼時輸入 `rootpass`。完成後約 279 筆，`market` 為 `twse` 或 `tpex`。PowerShell 把 `export ...` 換成：
+
+```powershell
+$env:MYSQL_HOST = "127.0.0.1"
+$env:MYSQL_PORT = "3306"
+$env:MYSQL_USER = "root"
+$env:MYSQL_DATABASE = "stock"
+```
+
+### 4. 抓股價寫進 `etf.etf_price`
+
+回到專案根目錄。這一支會依清單逐檔問 Yahoo，上市用 `.TW`、上櫃用 `.TWO`，把還原收盤、除權息和分割寫進 `etf`。全清單會跑很久；想先確認流程，用下面註解那行只抓 15 檔。
+
+```bash
+cd ../..
+docker compose -f docker/docker-compose.yml run --rm crawler
+# docker compose -f docker/docker-compose.yml run --rm -e ETF_LIMIT=15 crawler
+```
+
+Yahoo 查無報價的代號會略過，不中斷整批。跑完可在 phpMyAdmin 看 `etf.etf_price` 有沒有列。
+
+### 5. 跑頭期款試算
+
+試算讀 `etf.etf_price` 算各檔年化報酬，讀 `housing.city_house_price` 當六都總價，把每月需投入寫進 `etf.goal_down_payment`。`goal_calculator.py` 不在抓價 image 裡，所以用掛載把程式放進容器。
+
+目前表上是 2026Q3 的中位數。若 `crawlers/housing/crawler/extracted` 已有更新的一季成交檔，這次執行會重算總價中位數再寫回；沒有新檔就維持 2026Q3。第二個掛載就是把那個目錄給試算程式看。`housing_txn_qtr` 是每平方公尺單價，不會拿來換算一戶總價。
+
+`MONTHLY_INVEST=20000` 表示另外試算「每月存 2 萬、10 年後夠不夠付頭期款」。只想看每月要存多少時，可以把這個環境變數拿掉。
 
 ```bash
 docker compose -f docker/docker-compose.yml run --rm --no-deps -e MYSQL_PASSWORD=rootpass -e MONTHLY_INVEST=20000 -v "${PWD}/crawlers/etf/goal_calculator.py:/app/goal_calculator.py:ro" -v "${PWD}/crawlers/housing/crawler/extracted:/housing/crawler/extracted:ro" crawler uv run python goal_calculator.py
 ```
 
-### 3. 開啟 Redash
+結果在 phpMyAdmin 的 `etf.etf_cagr` 和 `etf.goal_down_payment`。
+
+### 6. 開啟 Redash
+
+圖表服務用自己的資料庫，和 ETF 的 MySQL 分開，所以要另外啟動。`create_db` 只在第一次建立 Redash 自己的表；之後只要 `up -d`。
 
 ```bash
 docker compose -f docker/redash-compose.yml run --rm server create_db
 docker compose -f docker/redash-compose.yml up -d
 ```
 
-瀏覽器開 http://localhost:5000 ，第一次建立管理員帳號。
+瀏覽器開 http://localhost:5000 ，第一次自己建立管理員帳號。
 
-Settings → Data Sources → New Data Source → MySQL。
+接著把 ETF 的 MySQL 接進來：Settings → Data Sources → New Data Source → MySQL。Host 填 `host.docker.internal`，因為 Redash 在容器裡，`localhost` 指的是它自己，不是你電腦上的 MySQL。
 
 | 欄位 | 值 |
 | --- | --- |
@@ -152,7 +205,7 @@ Settings → Data Sources → New Data Source → MySQL。
 | Password | `rootpass` |
 | Database | `etf` |
 
-查詢參數：`etf`（下拉，預設 `0050`）、`down_payment`（數字，預設 `0.2`）、`years`（數字，預設 `10`）、`monthly_invest`（數字，預設 `20000`）。下拉選項用 `SELECT stock_id FROM etf_cagr ORDER BY stock_id`。
+Create → Query，資料來源選剛建的 MySQL。這支查詢用畫面上的四個參數重算頭期款，不用改程式：`etf`（下拉，預設 `0050`）、`down_payment`（頭期款成數，預設 `0.2`）、`years`（年數，預設 `10`）、`monthly_invest`（每月投入，預設 `20000`）。ETF 下拉的選項要先另存一支查詢 `SELECT stock_id FROM etf_cagr ORDER BY stock_id`，而且要先執行過一次，下拉才有資料。
 
 ```sql
 SELECT
@@ -179,7 +232,9 @@ JOIN etf_cagr c ON c.stock_id = '{{etf}}'
 ORDER BY p.median_total_wan DESC
 ```
 
-ETF 欄位先選到一檔再按 **Apply Changes**。Dashboard 用 Add Widget 掛上這支查詢，參數類型選 Dashboard。Publish 之後其他帳號才看得到。
+存檔後先在 ETF 欄選到一檔，再按 **Apply Changes**。空白送出會因為沒有 ETF 參數而失敗。Table 是數字，長條圖用「每月需投入」。
+
+做成儀表板：Create → Dashboard，取名後存檔。右上 Refresh 旁的箭頭 → Add Widget，選這支查詢和圖或表。參數類型要選 Dashboard，四個條件才會出現在儀表板上方。改完按 Apply Changes。Publish 之後，其他登入帳號才看得到。
 
 ## MySQL 資料與驗證
 
