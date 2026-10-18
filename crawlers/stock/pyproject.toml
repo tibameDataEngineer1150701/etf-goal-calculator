@@ -1,0 +1,11 @@
+[project]
+name = "etf-practice"
+version = "0.1.0"
+requires-python = ">=3.11"
+dependencies = [
+    "apscheduler>=3.10,<4",
+    "celery==5.5.0",
+    "flask==3.1.0",
+    "pymysql[rsa]>=1.2.3",
+    "requests>=2.34.2",
+]

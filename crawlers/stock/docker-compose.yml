@@ -1,0 +1,52 @@
+name: etf-practice
+
+services:
+  worker:
+    image: etf-practice:0.1
+    build: .
+    environment:
+      TZ: Asia/Taipei
+      RABBITMQ_HOST: rabbitmq
+      RABBITMQ_PORT: "5672"
+      MYSQL_HOST: mysql
+      MYSQL_PORT: "3306"
+      MYSQL_USER: user
+      MYSQL_DATABASE: stock
+      MYSQL_PASSWORD: "${MYSQL_PASSWORD:?請先在終端機輸入MySQL密碼}"
+    networks:
+      - broker_net
+      - database_net
+    restart: "no"
+
+  producer:
+    image: etf-practice:0.1
+    command: ["python", "-m", "crawler.producer"]
+    environment:
+      TZ: Asia/Taipei
+      RABBITMQ_HOST: rabbitmq
+      RABBITMQ_PORT: "5672"
+    networks:
+      - broker_net
+    profiles: ["tools"]
+    restart: "no"
+
+  scheduler:
+    image: etf-practice:0.1
+    command: ["python", "-m", "crawler.scheduler"]
+    environment:
+      TZ: Asia/Taipei
+      RABBITMQ_HOST: rabbitmq
+      RABBITMQ_PORT: "5672"
+      SCHEDULE_SECONDS: "${SCHEDULE_SECONDS:-43200}"
+    networks:
+      - broker_net
+    profiles: ["schedule"]
+    restart: "no"
+
+networks:
+  broker_net:
+    external: true
+    name: crawler_dev
+  database_net:
+    external: true
+    name: my_network
