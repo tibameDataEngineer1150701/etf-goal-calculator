@@ -225,9 +225,8 @@ ORDER BY median_total_wan DESC;
 | 六都總價與頭期款試算 | 已寫入 `goal_down_payment` |
 | Redash 單一 ETF、頭期款、年數、每月投入 | 本機可操作 |
 | Producer、Celery、RabbitMQ | 程式在 `crawlers/etf`，排程尚未改走這條 |
-| Airflow DAG | 直接跑抓價 image；Docker Hub 帳號仍是佔位名稱 |
-| Line 通知 | 尚未接上 |
-| 多檔權重組合 | 尚未做 |
+| Airflow DAG | 直接跑抓價 image；Docker Hub 帳號尚未決定 |
+| 多檔權重組合 | 待討論 |
 
 Yahoo 查無報價的代號會略過，不中斷整批。`city_house_price` 讀不到時，試算改用手填粗估，畫面上會註明。
 
