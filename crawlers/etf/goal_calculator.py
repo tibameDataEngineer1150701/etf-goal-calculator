@@ -1,7 +1,8 @@
 # 目標試算：ETF 報酬 + 六都房價 → 「每月投入 X → 10 年後能否付頭期款」
 # 資料來源：
 #   - ETF 報酬：讀本專案 MySQL 的 etf_price（adj_close）→ 算含息年化報酬 CAGR
-#   - 六都房價：只讀 MySQL housing.city_house_price（總價中位數，萬元）
+#   - 六都房價：讀 MySQL housing.city_house_price。
+#     若組員爬蟲有解壓更新的一季成交檔，先重算總價中位數再寫回這張表。
 #
 # 用法：
 #   export MYSQL_HOST=localhost MYSQL_USER=帳號 MYSQL_PASSWORD=密碼 MYSQL_DB=etf
@@ -10,6 +11,7 @@
 
 import os
 import datetime
+from pathlib import Path
 import pandas as pd
 import pymysql
 
@@ -45,8 +47,154 @@ def get_conn(database=None):
                            password=MYSQL_PASSWORD, database=database or MYSQL_DB, charset="utf8mb4")
 
 
+# 2026Q3 六都住宅成交總價中位數。與 schema.sql 同一份，表是空的就補上。
+CITY_HOUSE_PRICE_SEED = [
+    ("台中市", 10403, 14850000, "2026Q3", 1485),
+    ("台北市", 5851, 28700000, "2026Q3", 2870),
+    ("台南市", 5126, 10850000, "2026Q3", 1085),
+    ("新北市", 13486, 16680000, "2026Q3", 1668),
+    ("桃園市", 12123, 12610000, "2026Q3", 1261),
+    ("高雄市", 8658, 10895000, "2026Q3", 1090),
+]
+
+
+# 組員成交檔的縣市代碼（檔名第一個字母）。只在我們這邊用來挑檔。
+CITY_FILE_CODE = {
+    "a": "台北市", "f": "新北市", "h": "桃園市",
+    "b": "台中市", "d": "台南市", "e": "高雄市",
+}
+RESIDENTIAL_TYPES = {"房地(土地+建物)", "房地(土地+建物)+車位"}
+
+
+def housing_extracted_roots():
+    # 組員爬蟲把實價登錄解壓在 crawlers/housing/crawler/extracted/115S3 這種目錄。
+    roots = []
+    configured = os.environ.get("HOUSING_EXTRACTED")
+    if configured:
+        roots.append(Path(configured))
+    roots.append(Path(__file__).resolve().parents[1] / "housing" / "crawler" / "extracted")
+    roots.append(Path("/housing/crawler/extracted"))
+    return roots
+
+
+def season_sort_key(name):
+    year, quarter = name.split("S", 1)
+    return (int(year), int(quarter))
+
+
+def season_to_period(name):
+    year, quarter = season_sort_key(name)
+    return f"{year + 1911}Q{quarter}"
+
+
+def latest_extracted_season():
+    seasons = []
+    for root in housing_extracted_roots():
+        if not root.is_dir():
+            continue
+        for folder in root.iterdir():
+            if not folder.is_dir() or "S" not in folder.name:
+                continue
+            year = folder.name.split("S", 1)[0]
+            if year.isdigit():
+                seasons.append(folder)
+    if not seasons:
+        return None
+    return max(seasons, key=lambda folder: season_sort_key(folder.name))
+
+
+def median_rows_from_season(season_dir):
+    # 住宅成交、總價大於 0，取各市總價中位數。
+    frames = []
+    for path in season_dir.glob("*_lvr_land_[ab].csv"):
+        city = CITY_FILE_CODE.get(path.name[0].lower())
+        if city is None:
+            continue
+        frame = pd.read_csv(path, encoding="utf-8-sig", dtype=str, skiprows=[1],
+                            usecols=["交易標的", "總價元"])
+        frame = frame[frame["交易標的"].isin(RESIDENTIAL_TYPES)]
+        frame["總價元"] = pd.to_numeric(frame["總價元"], errors="coerce")
+        frame = frame[frame["總價元"] > 0]
+        if frame.empty:
+            continue
+        frame["city"] = city
+        frames.append(frame[["city", "總價元"]])
+    if not frames:
+        return []
+    combined = pd.concat(frames, ignore_index=True)
+    grouped = combined.groupby("city")["總價元"]
+    period = season_to_period(season_dir.name)
+    rows = []
+    for city, series in grouped:
+        median_yuan = int(round(float(series.median())))
+        rows.append((city, int(series.size), median_yuan, period, int(round(median_yuan / 10000))))
+    return rows
+
+
+def refresh_city_house_price():
+    # 有最新一季成交檔就重算並覆蓋；沒有檔，或檔比表上的季別舊，就維持現值。
+    season = latest_extracted_season()
+    if season is None:
+        print("沒有新的成交檔，六都中位數維持資料庫現值")
+        return
+    rows = median_rows_from_season(season)
+    if not rows:
+        print(f"{season.name} 沒有六都住宅成交，六都中位數維持資料庫現值")
+        return
+    period = rows[0][3]
+    conn = get_conn()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT MAX(period) FROM housing.city_house_price")
+            current = cur.fetchone()[0]
+            if current and period < str(current):
+                print(f"成交檔 {season.name}（{period}）比資料庫 {current} 舊，不覆蓋")
+                return
+            for city, count, median_yuan, row_period, median_wan in rows:
+                cur.execute("DELETE FROM housing.city_house_price WHERE city=%s", (city,))
+                cur.execute(
+                    "INSERT INTO housing.city_house_price "
+                    "(city, transaction_count, median_total_yuan, period, median_total_wan) "
+                    "VALUES (%s,%s,%s,%s,%s)",
+                    (city, count, median_yuan, row_period, median_wan))
+        conn.commit()
+    finally:
+        conn.close()
+    print(f"已用 {season.name} 更新 {len(rows)} 個城市的總價中位數（{period}）")
+
+
+def ensure_city_house_price():
+    # 建庫建表。表是空的才寫入 2026Q3，之後改由成交檔覆蓋。
+    conn = get_conn()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                "CREATE DATABASE IF NOT EXISTS housing "
+                "CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci")
+            cur.execute(
+                "CREATE TABLE IF NOT EXISTS housing.city_house_price ("
+                " city VARCHAR(16) NOT NULL,"
+                " transaction_count BIGINT,"
+                " median_total_yuan BIGINT,"
+                " period VARCHAR(16),"
+                " median_total_wan INT,"
+                " PRIMARY KEY (city))")
+            cur.execute("SELECT COUNT(*) FROM housing.city_house_price")
+            if cur.fetchone()[0] == 0:
+                cur.executemany(
+                    "INSERT INTO housing.city_house_price "
+                    "(city, transaction_count, median_total_yuan, period, median_total_wan) "
+                    "VALUES (%s,%s,%s,%s,%s)",
+                    CITY_HOUSE_PRICE_SEED)
+        conn.commit()
+    finally:
+        conn.close()
+
+
 def load_city_prices():
-    # 只讀 MySQL。組員彙總在 housing_txn_qtr（單價），頭期款用的是總價中位數。
+    # 先依最新成交檔更新中位數，再從 MySQL 讀。housing_txn_qtr 是單價，不用來換算總價。
+    ensure_city_house_price()
+    refresh_city_house_price()
     sql = "SELECT city, median_total_wan, period FROM city_house_price"
     try:
         conn = get_conn(HOUSING_DB)
