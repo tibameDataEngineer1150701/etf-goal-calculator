@@ -1,7 +1,7 @@
 # 目標試算：ETF 報酬 + 六都房價 → 「每月投入 X → 10 年後能否付頭期款」
 # 資料來源：
 #   - ETF 報酬：讀本專案 MySQL 的 etf_price（adj_close）→ 算含息年化報酬 CAGR
-#   - 六都房價：目前用「參數」帶入（等組員 的實價登錄金額出來再填）
+#   - 六都房價：讀 housing.city_house_price（最新一季住宅成交總價中位數，萬元）
 #
 # 用法：
 #   export MYSQL_HOST=localhost MYSQL_USER=帳號 MYSQL_PASSWORD=密碼 MYSQL_DB=etf
@@ -18,6 +18,7 @@ MYSQL_PORT = int(os.environ.get("MYSQL_PORT", "3306"))
 MYSQL_USER = os.environ.get("MYSQL_USER", "root")
 MYSQL_PASSWORD = os.environ.get("MYSQL_PASSWORD", "")
 MYSQL_DB = os.environ.get("MYSQL_DB", "etf")
+HOUSING_DB = os.environ.get("HOUSING_DB", "housing")
 
 # ── 參數（可用環境變數覆蓋）──
 DOWN_PAYMENT_RATIO = float(os.environ.get("DOWN_PAYMENT_RATIO", "0.2"))   # 頭期款成數（預設 2 成）
@@ -25,9 +26,8 @@ YEARS = int(os.environ.get("INVEST_YEARS", "10"))                         # 投�
 MONTHLY_INVEST = float(os.environ.get("MONTHLY_INVEST", "0"))             # 每月投入(元)；0=只算需要多少
 CONSERVATIVE_RETURN = float(os.environ.get("CONSERVATIVE_RETURN", "0.07"))  # 保守年化報酬(對照用)
 
-# ⚠ 六都房價（總價，單位：萬元）——目前為「粗估佔位值」，
-#    請改成組員 實價登錄分析出來的實際數字！
-SIX_CITIES_PRICE_WAN = {
+# 讀不到 housing.city_house_price 時才用的粗估（總價，萬元）
+FALLBACK_CITY_PRICE_WAN = {
     "台北市": 2500,
     "新北市": 1500,
     "桃園市": 1000,
@@ -40,9 +40,28 @@ SIX_CITIES_PRICE_WAN = {
 PRIMARY_ETF = os.environ.get("PRIMARY_ETF", "0050")
 
 
-def get_conn():
+def get_conn(database=None):
     return pymysql.connect(host=MYSQL_HOST, port=MYSQL_PORT, user=MYSQL_USER,
-                           password=MYSQL_PASSWORD, database=MYSQL_DB, charset="utf8mb4")
+                           password=MYSQL_PASSWORD, database=database or MYSQL_DB, charset="utf8mb4")
+
+
+def load_city_prices():
+    # 六都住宅成交總價中位數（萬元）。表在 housing，和 ETF 股價同一個 MySQL。
+    sql = "SELECT city, median_total_wan, period FROM city_house_price"
+    try:
+        conn = get_conn(HOUSING_DB)
+        frame = pd.read_sql(sql, conn)
+        conn.close()
+    except Exception as err:
+        print(f"讀不到 {HOUSING_DB}.city_house_price（{err}），改用手填粗估房價")
+        return FALLBACK_CITY_PRICE_WAN, None
+    if frame.empty:
+        print(f"{HOUSING_DB}.city_house_price 沒有資料，改用手填粗估房價")
+        return FALLBACK_CITY_PRICE_WAN, None
+    period = frame["period"].iloc[0]
+    prices = {row.city: int(row.median_total_wan) for row in frame.itertuples()}
+    print(f"六都房價：{period} 住宅成交總價中位數（{HOUSING_DB}.city_house_price）")
+    return prices, period
 
 
 def load_etf_prices():
@@ -153,11 +172,12 @@ def main():
     print(f"\n主要試算報酬率：用 {name} = {r * 100:.2f}% /年（另附保守 {CONSERVATIVE_RETURN * 100:.0f}% 對照）")
     print(f"頭期款成數 {DOWN_PAYMENT_RATIO:.0%}、投資 {YEARS} 年")
 
+    city_prices, price_period = load_city_prices()
     print(f"\n=== 六都：每月需投入多少，{YEARS} 年後能付頭期款 ===")
     header = f"{'城市':<6}{'房價(萬)':>8}{'頭期款(萬)':>10}{'每月需投入@' + name:>16}{'每月需投入@保守':>16}"
     print(header)
     city_rows = []
-    for city, price_wan in SIX_CITIES_PRICE_WAN.items():
+    for city, price_wan in city_prices.items():
         target = price_wan * 10000 * DOWN_PAYMENT_RATIO          # 萬元→元 ×成數
         need_main = monthly_needed(target, r, YEARS)
         need_cons = monthly_needed(target, CONSERVATIVE_RETURN, YEARS)
@@ -175,13 +195,14 @@ def main():
         fv_cons = future_value_monthly(MONTHLY_INVEST, CONSERVATIVE_RETURN, YEARS)
         print(f"\n=== 若每月投入 {MONTHLY_INVEST:,.0f} 元，{YEARS} 年後能否付頭期款？ ===")
         print(f"  {YEARS} 年後累積：@{name} {fv_main:,.0f} 元 / @保守 {fv_cons:,.0f} 元")
-        for city, price_wan in SIX_CITIES_PRICE_WAN.items():
+        for city, price_wan in city_prices.items():
             target = price_wan * 10000 * DOWN_PAYMENT_RATIO
             ok_main = "可付" if fv_main >= target else "不足"
             ok_cons = "可付" if fv_cons >= target else "不足"
             print(f"  {city}：頭期款 {target:,.0f} 元 → @{name} {ok_main} / @保守 {ok_cons}")
 
-    print("\n⚠ 六都房價為佔位參數，請改成 組員 實價登錄的實際數字（程式最上方 SIX_CITIES_PRICE_WAN）。")
+    if price_period is None:
+        print("\n六都房價用的是手填粗估，不是實價登錄。")
 
 
 if __name__ == "__main__":

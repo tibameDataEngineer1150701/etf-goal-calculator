@@ -1,0 +1,81 @@
+# Redash 畫圖。圖表存在自己的 Postgres，查詢連既有的 MySQL（host.docker.internal:3306）。
+# 在專案根目錄：
+#   docker compose -f docker/redash-compose.yml run --rm server create_db
+#   docker compose -f docker/redash-compose.yml up -d
+# 瀏覽器開 http://localhost:5000
+
+name: redash
+
+x-redash-env: &redash-env
+  PYTHONUNBUFFERED: "0"
+  REDASH_LOG_LEVEL: INFO
+  REDASH_REDIS_URL: redis://redis:6379/0
+  REDASH_DATABASE_URL: postgresql://postgres:redash@postgres/postgres
+  REDASH_COOKIE_SECRET: etf-goal-redash-cookie
+  REDASH_SECRET_KEY: etf-goal-redash-secret
+
+services:
+  server:
+    image: redash/redash:10.1.0.b50633
+    command: server
+    ports:
+      - "5000:5000"
+    environment:
+      <<: *redash-env
+      REDASH_WEB_WORKERS: "4"
+    depends_on:
+      - postgres
+      - redis
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    restart: unless-stopped
+
+  scheduler:
+    image: redash/redash:10.1.0.b50633
+    command: scheduler
+    environment:
+      <<: *redash-env
+    depends_on:
+      - server
+    restart: unless-stopped
+
+  scheduled_worker:
+    image: redash/redash:10.1.0.b50633
+    command: worker
+    environment:
+      <<: *redash-env
+      QUEUES: scheduled_queries,schemas
+      WORKERS_COUNT: "1"
+    depends_on:
+      - server
+    restart: unless-stopped
+
+  adhoc_worker:
+    image: redash/redash:10.1.0.b50633
+    command: worker
+    environment:
+      <<: *redash-env
+      QUEUES: queries
+      WORKERS_COUNT: "1"
+    depends_on:
+      - server
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+
+  postgres:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_PASSWORD: redash
+      POSTGRES_USER: postgres
+      POSTGRES_DB: postgres
+    volumes:
+      - redash_postgres:/var/lib/postgresql/data
+    restart: unless-stopped
+
+volumes:
+  redash_postgres:

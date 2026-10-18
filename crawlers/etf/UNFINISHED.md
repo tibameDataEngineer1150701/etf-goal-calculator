@@ -1,39 +1,36 @@
-# 未完成 / 待辦事項（ETF 資料收集模組）
+# 第 5 次專題目標
 
-## 已完成（已實測）
+## 1. Airflow 改成自己的，且 build Docker image
 
-- `etf_to_mysql.py`：讀 `stock.etf_list` → 依市場（`.TW` / `.TWO`）抓 Yahoo 股價 / 除權息 / 分割 → 寫入 MySQL。讀不到清單會改用 FinMind。
-- `goal_calculator.py`：讀 `etf_price` 算各 ETF 含息年化報酬，搭配六都房價試算每月需投入與能否付頭期款。結果寫回 `etf_cagr`、`goal_down_payment`。
-- `schema.sql`：五張表（`etf_price` / `etf_dividend` / `etf_split` / `etf_cagr` / `goal_down_payment`）。
-- Docker：`docker/Dockerfile`、`docker/docker-compose.yml`。
-- Swarm：`swarm.yml`。
-- Airflow DAG：`dags/etf_etl_dag.py`。
-- 排程：`etf_scheduler.py`。
-- 分散式：`etf_worker.py` / `etf_tasks.py` / `etf_producer.py`。
+- [x] `dags/etf_etl_dag.py`、`docker/Dockerfile` 已有。本機 `docker compose` 可建出 image。
+- [ ] image 名稱仍是 `your-dockerhub-account/etf-crawler:0.0.1`，尚未改成自己的 Docker Hub 帳號，也尚未 `docker push`。
+- [ ] DAG 的 owner、image 要改成自己的；Airflow Variable `mysql_password` 尚未設定。
 
-## 待辦
+## 2. Airflow 結合 producer、Celery，定時發送任務
 
-### 帳號 / 連線
+- [x] `etf_producer.py`、`etf_tasks.py`、`etf_worker.py` 已有。排程時間訂為週一到週五 15:00。
+- [ ] DAG 現在是直接跑 `etf_to_mysql.py`，沒有呼叫 producer，也沒有把任務送進 Celery。
+- [ ] producer → RabbitMQ → worker 尚未在有 RabbitMQ 的環境跑過。
+- [ ] 這條流程尚未在 Airflow 裡定時觸發成功。
 
-- [ ] **Docker Hub**：image 尚未 push。Swarm 與 Airflow 都要從 Docker Hub pull。
-      `docker build -f docker/Dockerfile -t your-dockerhub-account/etf-crawler:0.0.1 .`
-- [ ] **團隊共用 MySQL**：`MYSQL_HOST`（Swarm 內為服務名 `mysql`）、`MYSQL_USER`、`MYSQL_PASSWORD`、埠號需統一。
-- [ ] **團隊共用 RabbitMQ**：`RABBITMQ_HOST`（Swarm 內為 `rabbitmq`）、帳密（預設 worker / worker）。
-- [ ] **Airflow Variable**：DAG 內 `{{ var.value.mysql_password }}` 需在 Airflow 後台設定。
+## 3. Redash 畫圖，或用 Line 發通知給自己
 
-### 跨組員資料
+- [x] 試算結果已寫入 `etf_cagr`、`goal_down_payment`。
+- [x] Redash 可調單一 ETF、頭期款比例、年數、每月投入。見 README。
+- [ ] 尚未接 Line 通知。
 
-- [ ] **`stock.etf_list`**：需確認已寫進團隊共用 MySQL（DB 名 `stock`、表 `etf_list`、欄位 `stock_id, market`）。
-- [ ] **六都房價**：`goal_calculator.py` 的 `SIX_CITIES_PRICE_WAN` 仍是佔位參數，待實價登錄金額填入，或改成讀房市資料表。
+## 4. code、yml 上傳 GitHub
 
-### 環境
+- [x] 程式、`docker/docker-compose.yml`、`swarm.yml`、DAG 已在 `main`。
 
-- [ ] **分散式端到端**：producer → RabbitMQ → worker 需在有 RabbitMQ 的環境實跑。
-      啟動工人：`uv run celery -A etf_tasks worker --loglevel=info`；發送任務：`uv run python etf_producer.py`
-- [ ] **Airflow**：目前只有 DAG 檔，放進 Airflow 的 `dags/` 後才會定時跑。
-- [ ] **Docker Swarm**：需在 Swarm 叢集實際部署，並設定 Node Label `etf_crawler`。
+## 5. 架構圖更新、README 更新
 
-### 文件
+- [x] `README.md` 已寫團隊目錄、Docker、試算與 Redash 操作。
+- [ ] README 尚未寫 Airflow、Celery 或 Line 的用法。
+- [ ] 架構圖尚未更新並上傳。
 
-- [ ] 架構圖更新並上傳團隊 repo。
-- [ ] （選擇性）`goal_calculator` 讓房價隨時間用房價指數推估未來值。
+## 仍待團隊資料
+
+- [ ] 團隊 MySQL、RabbitMQ 的主機與帳密。
+- [ ] `stock.etf_list`（`stock_id`、`market`）。讀不到時目前改走 FinMind。
+- [x] 六都房價。`housing.city_house_price` 為 2026Q3 住宅成交總價中位數；讀不到時試算才用手填粗估。
