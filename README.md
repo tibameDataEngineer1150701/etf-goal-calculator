@@ -121,7 +121,7 @@ uv sync
 docker compose -f docker/docker-compose.yml up --build
 ```
 
-第一次啟動會載入 `crawlers/etf/schema.sql`。phpMyAdmin：http://localhost:8080（`root` / `rootpass`）。
+第一次啟動會載入 `crawlers/etf/schema.sql`。phpMyAdmin：http://localhost:8080 （`root` / `rootpass`）。
 
 `stock.etf_list` 要先有資料，抓價才會用組員清單。清單程式在 `crawlers/stock`，寫入前需已有 `stock` 資料庫與 `etf_list` 表。
 
