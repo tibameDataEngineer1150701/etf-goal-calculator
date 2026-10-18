@@ -41,6 +41,17 @@ CREATE TABLE IF NOT EXISTS etf_cagr (
     PRIMARY KEY (stock_id)
 );
 
+-- 組員 ETF 清單（crawlers/stock 寫入，本專案只讀）
+CREATE DATABASE IF NOT EXISTS stock CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+CREATE TABLE IF NOT EXISTS stock.etf_list (
+    stock_id VARCHAR(20) NOT NULL PRIMARY KEY,
+    stock_name VARCHAR(100) NOT NULL,
+    industry_category VARCHAR(100) NOT NULL,
+    market VARCHAR(10) NOT NULL,
+    source_date DATE NOT NULL,
+    last_seen_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+) ENGINE=InnoDB CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+
 -- 5) 六都頭期款試算結果
 CREATE TABLE IF NOT EXISTS goal_down_payment (
     city                         VARCHAR(16) NOT NULL,   -- 城市
