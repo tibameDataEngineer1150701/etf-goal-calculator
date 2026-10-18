@@ -13,11 +13,10 @@
 - [ ] producer → RabbitMQ → worker 尚未在有 RabbitMQ 的環境跑過。
 - [ ] 這條流程尚未在 Airflow 裡定時觸發成功。
 
-## 3. Redash 畫圖，或用 Line 發通知給自己
+## 3. Redash 畫圖
 
 - [x] 試算結果已寫入 `etf_cagr`、`goal_down_payment`。
 - [x] Redash 可調單一 ETF、頭期款比例、年數、每月投入。見 README。
-- [ ] 尚未接 Line 通知。
 
 ## 4. code、yml 上傳 GitHub
 
@@ -26,7 +25,7 @@
 ## 5. 架構圖更新、README 更新
 
 - [x] `README.md` 已寫團隊目錄、Docker、試算與 Redash 操作。
-- [ ] README 尚未寫 Airflow、Celery 或 Line 的用法。
+- [ ] README 尚未寫 Airflow、Celery。
 - [ ] 架構圖尚未更新並上傳。
 
 ## 仍待團隊資料

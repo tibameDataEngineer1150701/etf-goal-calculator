@@ -130,7 +130,7 @@ docker compose -f docker/docker-compose.yml up --build
 MySQL 已在跑時，於專案根目錄：
 
 ```bash
-docker compose -f docker/docker-compose.yml run --rm --no-deps -e MYSQL_PASSWORD=rootpass -e MONTHLY_INVEST=20000 -v "${PWD}/crawlers/etf/goal_calculator.py:/app/goal_calculator.py:ro" crawler uv run python goal_calculator.py
+docker compose -f docker/docker-compose.yml run --rm --no-deps -e MYSQL_PASSWORD=rootpass -e MONTHLY_INVEST=20000 -v "${PWD}/crawlers/etf/goal_calculator.py:/app/goal_calculator.py:ro" -v "${PWD}/crawlers/housing/crawler/extracted:/housing/crawler/extracted:ro" crawler uv run python goal_calculator.py
 ```
 
 ### 3. 開啟 Redash
@@ -190,7 +190,7 @@ ETF 欄位先選到一檔再按 **Apply Changes**。Dashboard 用 Add Widget 掛
 | `etf.etf_dividend`、`etf.etf_split` | 除權息、分割 | `etf_to_mysql.py` |
 | `etf.etf_cagr` | 各檔含息年化報酬 | `goal_calculator.py` |
 | `etf.goal_down_payment` | 六都頭期款與每月需投入 | `goal_calculator.py` |
-| `housing.city_house_price` | 六都總價中位數（萬元） | 由實價登錄彙總後寫入 |
+| `housing.city_house_price` | 六都總價中位數（萬元）。目前種子是 2026Q3 | 試算時若 `crawlers/housing/crawler/extracted` 有更新的一季，會重算並覆蓋 |
 | `housing.housing_txn_qtr` | 六都單價與成交筆數 | `crawlers/housing` |
 | `housing.housing_price_index`、`housing.cpi`、`housing.real_hpi` | 房價指數、CPI、實質房價指數 | `crawlers/housing` |
 
@@ -228,7 +228,7 @@ ORDER BY median_total_wan DESC;
 | Airflow DAG | 直接跑抓價 image；Docker Hub 帳號尚未決定 |
 | 多檔權重組合 | 待討論 |
 
-Yahoo 查無報價的代號會略過，不中斷整批。`city_house_price` 讀不到時，試算改用手填粗估，畫面上會註明。
+Yahoo 查無報價的代號會略過，不中斷整批。`city_house_price` 連不上 MySQL 時，試算才改用手填粗估，畫面上會註明。
 
 ## 參考資料
 
