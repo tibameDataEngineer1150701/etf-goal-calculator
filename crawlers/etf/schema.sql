@@ -52,6 +52,32 @@ CREATE TABLE IF NOT EXISTS stock.etf_list (
     last_seen_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 ) ENGINE=InnoDB CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
+-- 六都住宅成交總價中位數，種子為 2026Q3。單位：median_total_yuan 為元，median_total_wan 為萬元。
+-- 第一次啟動寫入這份。之後 goal_calculator.py 若看到更新的一季成交檔，會重算並覆蓋。
+CREATE DATABASE IF NOT EXISTS housing CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+CREATE TABLE IF NOT EXISTS housing.city_house_price (
+    city                VARCHAR(16) NOT NULL,
+    transaction_count   BIGINT,
+    median_total_yuan   BIGINT,
+    period              VARCHAR(16),
+    median_total_wan    INT,
+    PRIMARY KEY (city)
+) ENGINE=InnoDB CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+INSERT INTO housing.city_house_price
+    (city, transaction_count, median_total_yuan, period, median_total_wan)
+VALUES
+    ('台中市', 10403, 14850000, '2026Q3', 1485),
+    ('台北市',  5851, 28700000, '2026Q3', 2870),
+    ('台南市',  5126, 10850000, '2026Q3', 1085),
+    ('新北市', 13486, 16680000, '2026Q3', 1668),
+    ('桃園市', 12123, 12610000, '2026Q3', 1261),
+    ('高雄市',  8658, 10895000, '2026Q3', 1090)
+ON DUPLICATE KEY UPDATE
+    transaction_count = VALUES(transaction_count),
+    median_total_yuan = VALUES(median_total_yuan),
+    period = VALUES(period),
+    median_total_wan = VALUES(median_total_wan);
+
 -- 5) 六都頭期款試算結果
 CREATE TABLE IF NOT EXISTS goal_down_payment (
     city                         VARCHAR(16) NOT NULL,   -- 城市
