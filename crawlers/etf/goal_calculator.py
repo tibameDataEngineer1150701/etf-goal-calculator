@@ -1,7 +1,7 @@
 # 目標試算：ETF 報酬 + 六都房價 → 「每月投入 X → 10 年後能否付頭期款」
 # 資料來源：
 #   - ETF 報酬：讀本專案 MySQL 的 etf_price（adj_close）→ 算含息年化報酬 CAGR
-#   - 六都房價：讀 housing.city_house_price（最新一季住宅成交總價中位數，萬元）
+#   - 六都房價：只讀 MySQL housing.city_house_price（總價中位數，萬元）
 #
 # 用法：
 #   export MYSQL_HOST=localhost MYSQL_USER=帳號 MYSQL_PASSWORD=密碼 MYSQL_DB=etf
@@ -46,7 +46,7 @@ def get_conn(database=None):
 
 
 def load_city_prices():
-    # 六都住宅成交總價中位數（萬元）。表在 housing，和 ETF 股價同一個 MySQL。
+    # 只讀 MySQL。組員彙總在 housing_txn_qtr（單價），頭期款用的是總價中位數。
     sql = "SELECT city, median_total_wan, period FROM city_house_price"
     try:
         conn = get_conn(HOUSING_DB)
@@ -58,9 +58,9 @@ def load_city_prices():
     if frame.empty:
         print(f"{HOUSING_DB}.city_house_price 沒有資料，改用手填粗估房價")
         return FALLBACK_CITY_PRICE_WAN, None
-    period = frame["period"].iloc[0]
-    prices = {row.city: int(row.median_total_wan) for row in frame.itertuples()}
-    print(f"六都房價：{period} 住宅成交總價中位數（{HOUSING_DB}.city_house_price）")
+    period = str(frame["period"].iloc[0])
+    prices = {str(row.city): int(row.median_total_wan) for row in frame.itertuples()}
+    print(f"六都房價：{period}（{HOUSING_DB}.city_house_price）")
     return prices, period
 
 
