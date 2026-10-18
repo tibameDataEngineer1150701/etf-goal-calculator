@@ -26,7 +26,8 @@ MYSQL_USER = os.environ.get("MYSQL_USER", "root")
 MYSQL_PASSWORD = os.environ.get("MYSQL_PASSWORD", "")
 MYSQL_DB = os.environ.get("MYSQL_DB", "etf")
 
-# ── ETF 清單來源：組員 的 stock.etf_list（已篩好的被動式 ETF 清單）──
+# 清單來自 crawlers/stock（組員程式，不在這裡改）。
+# 他們寫入 stock.etf_list，欄位 stock_id、market；market 為 twse 或 tpex。
 ETF_LIST_DB = os.environ.get("ETF_LIST_DB", "stock")
 ETF_LIST_TABLE = os.environ.get("ETF_LIST_TABLE", "etf_list")
 
@@ -56,11 +57,12 @@ def get_date_text(unix_seconds):
 
 
 def fetch_chart(stock_id, market):
-    # 上市 twse → .TW；上櫃 tpex → .TWO（很多債券 ETF 在上櫃）
-    if market == "twse":
-        suffix = ".TW"
-    else:
+    # 組員清單的 market：上市 twse → .TW；上櫃 tpex → .TWO
+    market_key = (market or "").strip().lower()
+    if market_key == "tpex":
         suffix = ".TWO"
+    else:
+        suffix = ".TW"
     symbol = stock_id + suffix
     period2 = int(time.time())
     period1 = period2 - 60 * 60 * 24 * 365 * 12        # 抓 12 年
