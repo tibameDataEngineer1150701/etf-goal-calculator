@@ -1,0 +1,22 @@
+*__pycache__/
+.vscode/
+*.pytest_cache/
+*.vscode
+.env
+*.pyc
+*.egg-info
+.cache
+build/
+local.ini
+taiwan_stock_price.csv
+
+# Local environments and generated data
+.venv/
+.env.*
+!.env.example
+*.csv
+*.csv.[0-9]*
+
+
+# Local README backup
+README.backup.md
