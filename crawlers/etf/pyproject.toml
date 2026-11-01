@@ -4,7 +4,9 @@ version = "0.1.0"
 description = "被動式 ETF 資料收集與目標試算"
 requires-python = ">=3.11"
 dependencies = [
+    "apscheduler>=3.10",
     "celery>=5.6.3",
+    "loguru>=0.7",
     "pandas>=2.2",
     "pymysql>=1.1",
 ]

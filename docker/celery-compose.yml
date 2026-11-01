@@ -1,0 +1,94 @@
+# 本機用。RabbitMQ、Flower、上市／上櫃 worker。MySQL 用 docker/docker-compose.yml 先啟動。
+# 在專案根目錄：
+#   docker compose -f docker/docker-compose.yml up -d mysql
+#   docker compose -f docker/celery-compose.yml up -d --build
+#   docker compose -f docker/celery-compose.yml --profile dispatch run --rm -e ETF_LIMIT=2 producer
+# 排程（週一到週五 15:00 派送）：
+#   docker compose -f docker/celery-compose.yml --profile schedule up -d scheduler
+#
+# VM 不要跑這個檔。VM 已有 stack etf 的 mysql、rabbitmq，網路是 etf_etf，
+# 15672 也已被占用。VM 用專案根目錄的 swarm.yml。
+
+name: etf
+
+services:
+  rabbitmq:
+    image: rabbitmq:3-management
+    environment:
+      RABBITMQ_DEFAULT_USER: worker
+      RABBITMQ_DEFAULT_PASS: worker
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  flower:
+    image: mher/flower:2.0
+    command: celery flower --broker=amqp://worker:worker@rabbitmq:5672//
+    ports:
+      - "5555:5555"
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+
+  worker_twse:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    command: uv run celery -A etf_tasks worker --loglevel=info -Q twse --hostname=twse@%h
+    environment: &worker_env
+      MYSQL_HOST: mysql
+      MYSQL_PORT: "3306"
+      MYSQL_USER: root
+      MYSQL_PASSWORD: rootpass
+      MYSQL_DB: etf
+      RABBITMQ_HOST: rabbitmq
+      RABBITMQ_PORT: "5672"
+      RABBITMQ_USER: worker
+      RABBITMQ_PASSWORD: worker
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+
+  worker_tpex:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    command: uv run celery -A etf_tasks worker --loglevel=info -Q tpex --hostname=tpex@%h
+    environment: *worker_env
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+
+  producer:
+    profiles: ["dispatch"]
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    command: uv run python etf_producer.py
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    environment:
+      <<: *worker_env
+      ETF_LIMIT: ${ETF_LIMIT:-2}
+
+  scheduler:
+    profiles: ["schedule"]
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    command: uv run python etf_scheduler.py
+    environment: *worker_env
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+
+networks:
+  default:
+    name: etf_default
+    external: true

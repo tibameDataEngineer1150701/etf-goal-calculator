@@ -1,5 +1,5 @@
 # 被動式 ETF 抓價入庫
-# 目標：把「抓被動式 ETF 股價/除權息/分割 → 寫進 MySQL」的程式打包成一個可攜的 image。
+# 目標：把「抓被動式 ETF 還原收盤 → 寫進 MySQL」的程式打包成一個可攜的 image。
 # 建置時的 context 是專案根目錄：docker build -f docker/Dockerfile .
 
 FROM python:3.11-slim
@@ -13,8 +13,10 @@ WORKDIR /app
 COPY crawlers/etf/pyproject.toml crawlers/etf/uv.lock crawlers/etf/.python-version ./
 RUN uv sync --frozen
 
-# 再複製程式碼（主流程與讀不到 DB 清單時的備援）
-COPY crawlers/etf/etf_to_mysql.py crawlers/etf/etf_universe.py ./
+# 再複製程式碼（直接抓價、Celery 任務、讀不到 DB 清單時的備援）
+COPY crawlers/etf/etf_to_mysql.py crawlers/etf/etf_universe.py \
+     crawlers/etf/etf_worker.py crawlers/etf/etf_tasks.py \
+     crawlers/etf/etf_producer.py crawlers/etf/etf_scheduler.py ./
 
 # 連線資訊「預設值」——實際帳密請在執行時用 -e 或 docker compose 傳入，不要寫死
 ENV MYSQL_HOST=mysql \

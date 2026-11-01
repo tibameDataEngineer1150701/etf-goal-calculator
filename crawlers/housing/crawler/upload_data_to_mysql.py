@@ -24,7 +24,8 @@ DATASETS = {
     "housing_txn_qtr": PROCESSED_DIR / "residential_transactions_quarterly.csv",
     "housing_price_index": PROCESSED_DIR / "housing_price_index.csv",
     "cpi": PROCESSED_DIR / "cpi.csv",
-    "hpi": PROCESSED_DIR / "real_hpi.csv"
+    "hpi": PROCESSED_DIR / "real_hpi.csv",
+    "down_pmt_target": PROCESSED_DIR / "down_payment_target.csv"
 }
 
 
@@ -68,8 +69,7 @@ def upload_csv(engine, table_name: str, file_path: Path):
         f"{len(df)} rows，{len(df.columns)} columns"
     )
 
-    # append：新增資料，不主動覆蓋整張表
-    # 注意：append 本身不會防止重複資料
+    # 注意：append 把 CSV 資料新增到資料表，不主動覆蓋整張表、不自動判斷哪些資料已存在
     df.to_sql(
         name=table_name,
         con=engine,

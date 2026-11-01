@@ -1,8 +1,9 @@
 # 目標試算：ETF 報酬 + 六都房價 → 「每月投入 X → 10 年後能否付頭期款」
 # 資料來源：
 #   - ETF 報酬：讀本專案 MySQL 的 etf_price（adj_close）→ 算含息年化報酬 CAGR
-#   - 六都房價：讀 MySQL housing.city_house_price。
-#     若組員爬蟲有解壓更新的一季成交檔，先重算總價中位數再寫回這張表。
+#   - 六都頭期款：優先讀組員寫入的 down_pmt_target（成屋買賣、中性）。
+#     那張表沒有資料時，改讀 housing.city_house_price 的總價中位數再乘頭期款成數。
+#     若成交檔有更新的一季，會先重算中位數再寫回 city_house_price。
 #
 # 用法：
 #   export MYSQL_HOST=localhost MYSQL_USER=帳號 MYSQL_PASSWORD=密碼 MYSQL_DB=etf
@@ -27,6 +28,9 @@ DOWN_PAYMENT_RATIO = float(os.environ.get("DOWN_PAYMENT_RATIO", "0.2"))   # 頭�
 YEARS = int(os.environ.get("INVEST_YEARS", "10"))                         # 投資年數
 MONTHLY_INVEST = float(os.environ.get("MONTHLY_INVEST", "0"))             # 每月投入(元)；0=只算需要多少
 CONSERVATIVE_RETURN = float(os.environ.get("CONSERVATIVE_RETURN", "0.07"))  # 保守年化報酬(對照用)
+# 組員 down_pmt_target 有成屋／預售屋，以及保守、中性、樂觀。試算預設取成屋、中性。
+HOUSE_TXN_TYPE = os.environ.get("HOUSE_TXN_TYPE", "成屋買賣")
+HOUSE_SCENARIO = os.environ.get("HOUSE_SCENARIO", "中性")
 
 # 讀不到 housing.city_house_price 時才用的粗估（總價，萬元）
 FALLBACK_CITY_PRICE_WAN = {
@@ -191,8 +195,52 @@ def ensure_city_house_price():
         conn.close()
 
 
+def normalize_city(name):
+    # 組員輸出用「臺」，試算表與種子用「台」，同一個市。
+    return {"臺北市": "台北市", "臺中市": "台中市", "臺南市": "台南市"}.get(str(name), str(name))
+
+
+def load_down_payment_targets():
+    # 組員 upload 預設寫進 mydb；本專案約定放在 housing。兩邊都看，有資料就用。
+    sql = (
+        "SELECT region, house_price, down_payment_target, house_price_period "
+        "FROM down_pmt_target WHERE transaction_type=%s AND scenario=%s")
+    for database in (HOUSING_DB, "mydb"):
+        conn = None
+        try:
+            conn = get_conn(database)
+            with conn.cursor() as cur:
+                cur.execute(sql, (HOUSE_TXN_TYPE, HOUSE_SCENARIO))
+                rows = cur.fetchall()
+        except Exception:
+            rows = []
+        finally:
+            if conn is not None:
+                conn.close()
+        if not rows:
+            continue
+        prices = {}
+        targets = {}
+        period = None
+        for region, house_price, down_payment, house_period in rows:
+            city = normalize_city(region)
+            prices[city] = int(round(float(house_price) / 10000))
+            targets[city] = int(round(float(down_payment)))
+            period = str(house_period)
+        print(
+            f"六都頭期款：{period} {HOUSE_TXN_TYPE}／{HOUSE_SCENARIO}"
+            f"（{database}.down_pmt_target）")
+        return prices, targets, period
+    return None
+
+
 def load_city_prices():
-    # 先依最新成交檔更新中位數，再從 MySQL 讀。housing_txn_qtr 是單價，不用來換算總價。
+    # 組員已算出 10 年後頭期款時，直接用那張表，不再用成交總價中位數重算。
+    found = load_down_payment_targets()
+    if found is not None:
+        prices, targets, period = found
+        return prices, period, targets
+
     ensure_city_house_price()
     refresh_city_house_price()
     sql = "SELECT city, median_total_wan, period FROM city_house_price"
@@ -202,14 +250,14 @@ def load_city_prices():
         conn.close()
     except Exception as err:
         print(f"讀不到 {HOUSING_DB}.city_house_price（{err}），改用手填粗估房價")
-        return FALLBACK_CITY_PRICE_WAN, None
+        return FALLBACK_CITY_PRICE_WAN, None, None
     if frame.empty:
         print(f"{HOUSING_DB}.city_house_price 沒有資料，改用手填粗估房價")
-        return FALLBACK_CITY_PRICE_WAN, None
+        return FALLBACK_CITY_PRICE_WAN, None, None
     period = str(frame["period"].iloc[0])
     prices = {str(row.city): int(row.median_total_wan) for row in frame.itertuples()}
-    print(f"六都房價：{period}（{HOUSING_DB}.city_house_price）")
-    return prices, period
+    print(f"六都房價：{period}（{HOUSING_DB}.city_house_price，尚無 down_pmt_target）")
+    return prices, period, None
 
 
 def load_etf_prices():
@@ -320,16 +368,19 @@ def main():
     print(f"\n主要試算報酬率：用 {name} = {r * 100:.2f}% /年（另附保守 {CONSERVATIVE_RETURN * 100:.0f}% 對照）")
     print(f"頭期款成數 {DOWN_PAYMENT_RATIO:.0%}、投資 {YEARS} 年")
 
-    city_prices, price_period = load_city_prices()
+    city_prices, price_period, down_payments = load_city_prices()
     print(f"\n=== 六都：每月需投入多少，{YEARS} 年後能付頭期款 ===")
     header = f"{'城市':<6}{'房價(萬)':>8}{'頭期款(萬)':>10}{'每月需投入@' + name:>16}{'每月需投入@保守':>16}"
     print(header)
     city_rows = []
     for city, price_wan in city_prices.items():
-        target = price_wan * 10000 * DOWN_PAYMENT_RATIO          # 萬元→元 ×成數
+        if down_payments is not None and city in down_payments:
+            target = down_payments[city]
+        else:
+            target = price_wan * 10000 * DOWN_PAYMENT_RATIO          # 萬元→元 ×成數
         need_main = monthly_needed(target, r, YEARS)
         need_cons = monthly_needed(target, CONSERVATIVE_RETURN, YEARS)
-        print(f"{city:<6}{price_wan:>8}{price_wan * DOWN_PAYMENT_RATIO:>10.0f}"
+        print(f"{city:<6}{price_wan:>8}{target / 10000:>10.0f}"
               f"{need_main:>16,.0f}{need_cons:>16,.0f}")
         city_rows.append((city, price_wan, int(target), name, round(r, 5),
                           int(need_main), int(need_cons)))
@@ -344,7 +395,10 @@ def main():
         print(f"\n=== 若每月投入 {MONTHLY_INVEST:,.0f} 元，{YEARS} 年後能否付頭期款？ ===")
         print(f"  {YEARS} 年後累積：@{name} {fv_main:,.0f} 元 / @保守 {fv_cons:,.0f} 元")
         for city, price_wan in city_prices.items():
-            target = price_wan * 10000 * DOWN_PAYMENT_RATIO
+            if down_payments is not None and city in down_payments:
+                target = down_payments[city]
+            else:
+                target = price_wan * 10000 * DOWN_PAYMENT_RATIO
             ok_main = "可付" if fv_main >= target else "不足"
             ok_cons = "可付" if fv_cons >= target else "不足"
             print(f"  {city}：頭期款 {target:,.0f} 元 → @{name} {ok_main} / @保守 {ok_cons}")

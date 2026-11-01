@@ -1,14 +1,15 @@
 """
+實價登錄資料清理與季度彙總
 Design a data quality validation process across Taiwan real-estate transaction CSV files (sale and presale).
 
 The pipeline automatically:
-- removes the English metadata row,
-- normalizes A/B schemas,
-- handles known CSV formatting inconsistencies,
-- investigates duplicate transactions,
-- converts ROC dates and numeric fields,
-- validates quarterly coverage,
-- applies residential and analysis-eligibility filters.
+- removes the English metadata row
+- normalizes A/B schemas
+- handles known CSV formatting inconsistencies
+- investigates duplicate transactions
+- converts ROC dates and numeric fields
+- validates quarterly coverage
+- applies residential and analysis-eligibility filters
 
 Current coverage:2016Q1 → 2026Q3
 
@@ -19,7 +20,7 @@ b csv: 自動處理 trailing comma
 不修改原始 CSV
 
 2. Schema normalization
-a csv: 33 欄, sale 不動產買賣
+a csv: 33 欄, sale 成屋買賣
 b csv: 31 欄, presale 預售屋買賣
 -> 建立共同欄位: transaction_type
 
@@ -51,6 +52,7 @@ Residential filter
 Analysis eligibility
 """
 from pathlib import Path
+from loguru import logger
 import pandas as pd
 
 # ============================================================
@@ -65,7 +67,7 @@ OUTPUT_CSV = (PROCESSED_DIR / "residential_transactions_quarterly.csv")
 
 # Analysis data are restricted to transactions with transaction dates on or before the analysis cutoff date.
 # 明確定義資料截止日期，period: quarterly aggregation key
-# 只分析 2016-01-01 ~ 2026-09-30, 具"有效正數單價"的不動產、預售屋交易
+# 只分析 2016-01-01 ~ 2026-09-30, 具"有效正數單價"的不動產(成屋)、預售屋交易
 ANALYSIS_START_DATE = pd.Timestamp("2016-01-01")
 ANALYSIS_CUTOFF_DATE = pd.Timestamp("2026-09-30")
 
@@ -91,6 +93,24 @@ COMMON_COLUMNS = [
     "編號"]
 
 # ============================================================
+# Exact duplicate definition (讓驗證及去重函式共用)
+# ============================================================
+
+DEDUPLICATE_COLUMNS = [
+    "鄉鎮市區",
+    "交易標的",
+    "土地位置建物門牌",
+    "交易年月日",
+    "交易筆棟數",
+    "建物型態",
+    "總價元",
+    "單價元平方公尺",
+    "車位類別",
+    "車位總價元",
+    "編號",
+    "transaction_type"]
+
+# ============================================================
 # Import / Read a CSV
 # ============================================================
 
@@ -110,20 +130,21 @@ def read_a_csv(file_path):
 
 
 # ============================================================
-# Import / Read b CSV
-# 先讀 header
-#       ↓
-# 取得該檔案應有幾個 fields
-#       ↓
-# 每一筆資料檢查
-#       ↓
-# 如果多出的是最末端空欄位
-#       ↓
-# 刪除多餘最末端空欄位
-#       ↓
-# 如果仍然不符合
-#       ↓
-# 直接報錯並印出 file + line + raw data + Expected fields + Actual fields
+# 遇到無法安全修復的 B CSV，不中止整支 ETL，而是記錄錯誤、跳過該檔案，
+# 繼續處理其他 B CSV
+# Import / Read B CSV
+# → Read header
+# → Determine expected number of fields
+# → Read and validate each transaction row
+# → If field count matches expected fields →→ Keep the row
+# → If extra fields are detected
+# →→ Check whether the extra fields can be safely normalized
+# →→→ If safely recoverable, normalize and log the adjustment
+# →→→ If not safely recoverable, raise an error with:
+#       file + line + raw data + expected fields + actual fields
+# → Catch the error in the outer file-processing loop
+# → Log the failed file and continue processing other B CSV files
+# → Summarize failed files after processing
 # ============================================================
 
 import csv
@@ -132,7 +153,7 @@ import sys
 # 只在「多餘欄位可合理視為最末欄的一部分」時合併；若欄位數少於 header, error
 def read_b_csv(file_path):
     """
-    Read one B CSV file.
+    Read B CSV files.
 
     B CSV:
     - First row: Chinese header
@@ -142,14 +163,7 @@ def read_b_csv(file_path):
     - Some historical files contain unquoted commas in the final「棟及號」 field.
     - Raw CSV files are never modified.
 
-    Processing logic:
-        Detect
-          ↓
-        Normalize
-          ↓
-        Validate
-          ↓
-        Preserve
+    Processing logic:Detect → Normalize → Validate → Preserve
     """
 
     with open(
@@ -209,14 +223,17 @@ def read_b_csv(file_path):
             if actual_fields > expected_fields:
                 extra_fields = actual_fields - expected_fields
 
-                print(
-                    f"! B CSV field-count adjustment: "
-                    f"{file_path.name}, "
-                    f"line {line_number}, "
-                    f"{actual_fields} → {expected_fields}; "
-                    f"extra fields: {extra_fields}; "
-                    f"merged into {header[-1]}")
+                # 僅允許已知的末欄格式異常
+                if header[-1].strip() != "棟及號":
+                    raise ValueError(
+                        f"Cannot safely normalize CSV row: "
+                        f"file={file_path.name}, "
+                        f"line={line_number}, "
+                        f"expected={expected_fields}, "
+                        f"actual={actual_fields}, "
+                        f"row={row!r}")
 
+                # 將多出的欄位合併至最後一欄
                 normalized_last_field = ",".join(
                     row[expected_fields - 1:])
 
@@ -224,16 +241,19 @@ def read_b_csv(file_path):
                     row[:expected_fields - 1]
                     + [normalized_last_field])
 
+                # 修復後再次確認欄位數
                 if len(normalized_row) != expected_fields:
-
                     raise ValueError(
-                        f"B CSV normalization failed: "
-                        f"{file_path.name}, "
-                        f"line {line_number}, "
-                        f"expected {expected_fields}, "
-                        f"got {len(normalized_row)}")
+                        f"Normalization failed: "
+                        f"{file_path.name}, line {line_number}")
 
                 rows.append(normalized_row)
+
+                print(
+                    f"Repaired B CSV row: {file_path.name}, "
+                    f"line {line_number}, "
+                    f"{actual_fields} -> {expected_fields}")
+
                 continue
 
             # ------------------------------------------------
@@ -267,7 +287,7 @@ def read_b_csv(file_path):
     return df
 
 # ============================================================
-# Clean and standardize a DataFrame
+# Clean and standardize a DataFrame (成屋)
 # ============================================================
 
 def clean_a_dataframe(df):
@@ -276,13 +296,13 @@ def clean_a_dataframe(df):
     df = df[COMMON_COLUMNS].copy()
 
     # Identify transaction type: sale
-    df["transaction_type"] = "不動產買賣"
+    df["transaction_type"] = "成屋買賣"
 
     return df
 
 
 # ============================================================
-# Clean and standardize b DataFrame
+# Clean and standardize b DataFrame (預售屋)
 # ============================================================
 
 def clean_b_dataframe(df):
@@ -297,37 +317,77 @@ def clean_b_dataframe(df):
 
 
 # ============================================================
-# Load and clean all a CSV files
+# Load and clean all A CSV files
 # ============================================================
+# 某份 A CSV 讀取或清理失敗時，記錄檔名與錯誤，繼續處理其他 A CSV；
+# 如全部失敗，中止後續流程
 
 def load_all_a_csv():
+
     files = sorted(EXTRACTED_DIR.rglob("*_lvr_land_a.csv"))
 
-    # 確認總共匯入幾份 a CSV
     print(f"\nFound {len(files)} A CSV files.")
-    for file_path in files[:20]:
-        print(file_path)
 
     dataframes = []
+    failed_files = []
 
     for file_path in files:
-        df = read_a_csv(file_path)
-        df = clean_a_dataframe(df)
+        print(f"Reading: {file_path}")
 
-        # 保留原始資料來源，供 data lineage（資料來源追蹤）使用
-        # source_file 不作為交易本身的 duplicate key
-        df["source_file"] = file_path.name
+        try:
+            df = read_a_csv(file_path)
+            df = clean_a_dataframe(df)
 
-        dataframes.append(df)
+            # 保留來源資訊，供 data lineage 使用
+            df["source_file"] = file_path.name
+
+            dataframes.append(df)
+
+        except Exception as e:
+            error_info = {
+                "file": str(file_path),
+                "error_type": type(e).__name__,
+                "error": str(e),
+            }
+
+            failed_files.append(error_info)
+
+            print("\n" + "=" * 70)
+            print("A CSV processing error")
+            print("=" * 70)
+            print(f"File: {file_path}")
+            print(f"Error: {type(e).__name__}: {e}")
+            print("Action: Skip this file and continue.")
+            print("=" * 70)
+
+            continue
+
+    # 彙整失敗檔案
+    print("\n========== A CSV Processing Summary ==========")
+    print(f"Total files found: {len(files)}")
+    print(f"Successfully loaded: {len(dataframes)}")
+    print(f"Failed files: {len(failed_files)}")
+
+    for item in failed_files:
+        print(f"\nFile: {item['file']}")
+        print(f"Error: {item['error_type']}: {item['error']}")
 
     if not dataframes:
-        raise ValueError("No A CSV files found.")
+        raise ValueError(
+            "No A CSV files were successfully loaded."
+        )
 
-    return pd.concat(dataframes, ignore_index=True)
+    combined_df = pd.concat(dataframes, ignore_index=True)
+
+    print(f"Combined A CSV rows: {len(combined_df):,}")
+
+    return combined_df
+
+
 
 
 # ============================================================
-# Load and clean all b CSV files
+# Load and clean all B CSV files
 # ============================================================
 
 def load_all_b_csv():
@@ -337,6 +397,7 @@ def load_all_b_csv():
     print(f"\nFound {len(files)} B CSV files.")
 
     dataframes = []
+    failed_files = []
 
     for file_path in files:
 
@@ -344,27 +405,67 @@ def load_all_b_csv():
 
         try:
             df = read_b_csv(file_path)
+            df = clean_b_dataframe(df)
+
+            # 保留原始資料來源，供 data lineage（資料來源追蹤）使用
+            # source_file 不作為交易本身的 duplicate key
+            df["source_file"] = file_path.name
+            dataframes.append(df)
 
         except Exception as e:
-            print("\n" + "=" * 70)
+            print("\n" + "-" * 70)
             print("B CSV parsing error")
-            print("=" * 70)
+            print("-" * 70)
             print(f"File: {file_path}")
+            print(f"Error type: {type(e).__name__}")
             print(f"Error: {e}")
-            raise
+            print("Action: Skip this file and continue.")
+            print("-" * 70)
 
-        df = clean_b_dataframe(df)
+            failed_files.append({
+                "file": str(file_path),
+                "error_type": type(e).__name__,
+                "error": str(e)})
 
-        # 保留原始資料來源，供 data lineage（資料來源追蹤）使用
-        # source_file 不作為交易本身的 duplicate key
-        df["source_file"] = file_path.name
+            continue
 
-        dataframes.append(df)
+    # --------------------------------------------------------
+    # Summarize failed files
+    # --------------------------------------------------------
 
+    if failed_files:
+        print("\n" + "-" * 70)
+        print("B CSV Failed Files Summary")
+        print("-" * 70)
+
+        for item in failed_files:
+            print(f"File: {item['file']}")
+            print(f"Error type: {item['error_type']}")
+            print(f"Error: {item['error']}")
+            print("-" * 70)
+
+        print(f"Total failed files: {len(failed_files)}")
+
+    else:
+        print("\nAll B CSV files were read successfully.")
+
+    # --------------------------------------------------------
+    # Combine successfully loaded files
+    # --------------------------------------------------------
+    # if there are no successfully loaded B CSV files, 
+    # raise an error to prevent further processing
     if not dataframes:
-        raise ValueError("No B CSV files found.")
+        raise ValueError(
+            "No B CSV files were successfully loaded. "
+            "Please check the failed files summary.")
+    
+    # concatenate all successfully loaded B CSV files into a single DataFrame
+    combined_df = pd.concat(dataframes, ignore_index=True)
 
-    return pd.concat(dataframes, ignore_index=True)
+    print(f"Successfully loaded B CSV files: {len(dataframes)}")
+    print(f"Combined B CSV rows: {len(combined_df):,}")
+
+    return combined_df
 
 
 # ============================================================
@@ -372,51 +473,10 @@ def load_all_b_csv():
 # ============================================================
 # source_file 係為了資料 lineage（資料來源追蹤）新增的 pipeline 衍生欄位，非原始交易資料欄位
 
-def validate_dataframe(df, name):
-    """
-    Validate the structure and basic data quality of a dataset.
-    """
-
-    print(f"\n{'=' * 70}")
-    print(f"{name} Validation")
-    print(f"{'=' * 70}")
-
-    print(f"Shape： {df.shape}")
-
-    required_columns = [
-        "鄉鎮市區",
-        "交易標的",
-        "土地位置建物門牌",
-        "交易年月日",
-        "交易筆棟數",
-        "建物型態",
-        "總價元",
-        "單價元平方公尺",
-        "車位類別",
-        "車位總價元",
-        "編號",
-        "transaction_type",
-        "source_file"]
-
-    # Check required columns
-    missing_columns = [column for column in required_columns if column not in df.columns]
-
-    if missing_columns:
-        raise ValueError(
-            f"{name} 缺少必要欄位：\n"
-            f"{missing_columns}")
-
-    print("Required columns: OK")
-
-    # Check transaction_type
-    print(f"Transaction types: "
-        f"{df['transaction_type'].dropna().unique().tolist()}")
-
 def validate_dataframe(
     df,
     name,
-    expected_transaction_type=None
-):
+    expected_transaction_type=None):
     """
     Validate the structure and basic data quality of a dataset.
     """
@@ -440,8 +500,7 @@ def validate_dataframe(
         "車位總價元",
         "編號",
         "transaction_type",
-        "source_file"
-    ]
+        "source_file"]
 
     # --------------------------------------------------------
     # 1. Check required columns
@@ -450,14 +509,12 @@ def validate_dataframe(
     missing_columns = [
         column
         for column in required_columns
-        if column not in df.columns
-    ]
+        if column not in df.columns]
 
     if missing_columns:
         raise ValueError(
             f"{name} 缺少必要欄位：\n"
-            f"{missing_columns}"
-        )
+            f"{missing_columns}")
 
     print("Required columns: OK")
 
@@ -467,19 +524,14 @@ def validate_dataframe(
 
     if df["transaction_type"].isna().any():
         raise ValueError(
-            f"{name} transaction_type contains missing values."
-        )
+            f"{name} transaction_type contains missing values.")
 
     if (df["transaction_type"].str.strip() == "").any():
         raise ValueError(
-            f"{name} transaction_type contains empty values."
-        )
+            f"{name} transaction_type contains empty values.")
 
     actual_types = set(
-        df["transaction_type"]
-        .dropna()
-        .unique()
-    )
+        df["transaction_type"].dropna().unique())
 
     print(f"Transaction types: {sorted(actual_types)}")
 
@@ -490,13 +542,11 @@ def validate_dataframe(
             raise ValueError(
                 f"{name} transaction_type mismatch: "
                 f"expected {expected_transaction_type}, "
-                f"got {actual_types}"
-            )
+                f"got {actual_types}")
 
         print(
             f"Transaction type validation: OK "
-            f"({expected_transaction_type})"
-        )
+            f"({expected_transaction_type})")
 
     # --------------------------------------------------------
     # 3. Check source_file
@@ -504,25 +554,40 @@ def validate_dataframe(
 
     if df["source_file"].isna().any():
         raise ValueError(
-            f"{name} source_file contains missing values."
-        )
+            f"{name} source_file contains missing values.")
 
     if (df["source_file"].str.strip() == "").any():
         raise ValueError(
-            f"{name} source_file contains empty values."
-        )
+            f"{name} source_file contains empty values.")
+
 
     # --------------------------------------------------------
-    # 4. Full-row duplicate check
+    # 4. Exact transaction duplicate check 重複檢查
     # --------------------------------------------------------
 
-    duplicate_count = df.duplicated().sum()
+    missing_dedup_columns = [
+        col for col in DEDUPLICATE_COLUMNS
+        if col not in df.columns]
 
-    print(
-        f"Full-row duplicates: {duplicate_count}"
-    )
+    if missing_dedup_columns:
+        raise ValueError(
+            f"{name} 缺少去重必要欄位："
+            f"{missing_dedup_columns}")
 
-    print("Validation completed.")
+    duplicate_count = df.duplicated(
+        subset=DEDUPLICATE_COLUMNS, keep="first").sum()
+
+    duplicate_group_count = (
+        df.loc[df.duplicated(
+            subset=DEDUPLICATE_COLUMNS,
+            keep=False)]
+            .groupby(DEDUPLICATE_COLUMNS,dropna=False).ngroups)
+    
+    # 若每組保留一筆，額外重複的列數=預期可刪除的筆數
+    print(f"Exact duplicate rows beyond first occurrence: {duplicate_count}")
+    # 有多少組重複交易
+    print(f"Exact duplicate groups: {duplicate_group_count}")
+
 
 # ============================================================
 # Data Quality Check: a CSV contains duplicates.
@@ -590,7 +655,7 @@ def investigate_transaction_id_duplicates(df, name):
     duplicated_id_df = df[duplicated_id_mask].copy()
 
     print(f"Rows with duplicated 編號: {len(duplicated_id_df)}")
-    print(f"Unique duplicated 編號: "f"{duplicated_id_df['編號'].nunique()}")
+    print(f"Unique duplicated 編號: {duplicated_id_df['編號'].nunique()}")
 
     if duplicated_id_df.empty:
         print("No duplicated transaction IDs found.")
@@ -604,41 +669,36 @@ def investigate_transaction_id_duplicates(df, name):
 
 
 # after investigation -> data cleaning
+
 def remove_exact_duplicates(df, name):
     """
     Remove exact duplicate transaction records.
-
-    The transaction ID (編號) is intentionally NOT used as the deduplication key
-    because duplicated IDs may represent different records.
+    source_file is excluded from the duplicate key.
+    編號亦非唯一去重依據
+    "欄位值完全相同"去重，不代表所有重複編號都應刪除
     """
 
     before_count = len(df)
 
-    # "source_file" 不加入 deduplicate_columns, 因需判斷"交易資料本身"是否完全相同，故"資料來源"並非主要key
-    deduplicate_columns = [
-        "鄉鎮市區",
-        "交易標的",
-        "土地位置建物門牌",
-        "交易年月日",
-        "交易筆棟數",
-        "建物型態",
-        "總價元",
-        "單價元平方公尺",
-        "車位類別",
-        "車位總價元",
-        "編號",
-        "transaction_type"]
+    missing_columns = [
+        col for col in DEDUPLICATE_COLUMNS
+        if col not in df.columns]
 
-    df_clean = df.drop_duplicates(subset=deduplicate_columns, keep="first").copy()
+    if missing_columns:
+        raise ValueError(
+            f"{name} 缺少去重必要欄位：{missing_columns}")
+
+    df_clean = df.drop_duplicates(
+        subset=DEDUPLICATE_COLUMNS,
+        keep="first").copy()
 
     after_count = len(df_clean)
-
     removed_count = before_count - after_count
 
     print(f"\n========== {name} Deduplication ==========")
-    print(f"Rows before deduplication: {before_count}")
-    print(f"Rows after deduplication:  {after_count}")
-    print(f"Exact duplicates removed:  {removed_count}")
+    print(f"Rows before deduplication: {before_count:,}")
+    print(f"Rows after deduplication:  {after_count:,}")
+    print(f"Exact duplicates removed:  {removed_count:,}")
 
     return df_clean
 
@@ -702,8 +762,14 @@ def convert_data_types(df, name):
 
         except (ValueError, TypeError):
             return pd.NaT
-
+        
+    # 區分:原始日期空白、原始日期有值，但格式錯誤或日期不存在、日期成功轉換
+    # 例如 41208 因長度不符目前支援的六位或七位格式而轉換失敗；原始值仍保留，可供追蹤
+    df["transaction_date_raw"] = df["交易年月日"]
     df["transaction_date"] = (df["交易年月日"].apply(convert_roc_date))
+    raw_date = (df["交易年月日"].astype("string").str.strip())
+    raw_date_missing = (raw_date.isna() | raw_date.eq(""))
+    df["date_conversion_failed"] = (~raw_date_missing & df["transaction_date"].isna())
 
     # --------------------------------------------------
     # 2. Convert numeric columns
@@ -715,25 +781,47 @@ def convert_data_types(df, name):
         "車位總價元"]
 
     for column in numeric_columns:
+        # 保留原始欄位內容，總價元_raw：轉換型態前的原始文字
+        df[f"{column}_raw"] = df[column]
+        # 總價元：轉換後的數值
+        raw = df[column].astype("string").str.strip()
+        # 總價元_conversion_failed：原始值非Null、但無法轉成數值的標記
+        raw_missing = raw.isna() | raw.eq("")
+        converted = pd.to_numeric(raw, errors="coerce")
 
-        df[column] = pd.to_numeric(df[column], errors="coerce")
+        conversion_failed = ~raw_missing & converted.isna()
+
+        # 保存品質標記，供後續追蹤
+        df[f"{column}_conversion_failed"] = conversion_failed
+
+        print(f"\n{column}")
+        print(f"Original missing values: {raw_missing.sum()}")
+        print(f"Numeric conversion failures: {conversion_failed.sum()}")
+
+        df[column] = converted
 
     # --------------------------------------------------
     # 3. Create quarter period
     # --------------------------------------------------
-
-    df["period"] = (df["transaction_date"].dt.to_period("Q").astype(str))
+    # "string"會使用 pandas nullable string 型態，讓缺失期間保留為 <NA>
+    df["period"] = (df["transaction_date"].dt.to_period("Q").astype("string"))
 
     print("Type conversion completed.")
 
     return df
 
-# Check transaction period coverage
+# Check transaction period coverage and row counts
+# 區分"季度完全沒有資料"、"季度有資料，但筆數異常少"
+# 不單因為某季筆數少就報錯，而是結合原始資料來源、該季交易特性、其他品質檢查結果判斷
 def check_transaction_period_coverage(
     df,
     name,
     start_period=ANALYSIS_START_PERIOD,
     end_period=ANALYSIS_END_PERIOD):
+    """
+    Check whether expected quarters exist and report row counts.
+    此係季度出現情形檢查，不等於該季度資料已完整。
+    """
 
     print("\n" + "=" * 70)
     print(f"{name} Transaction Period Coverage")
@@ -742,47 +830,66 @@ def check_transaction_period_coverage(
     expected_periods = pd.period_range(
         start=start_period,
         end=end_period,
-        freq="Q").astype(str)
+        freq="Q").astype("string")
 
-    actual_periods = set(
-        df["period"]
-        .dropna()
-        .astype(str))
+    period_series = df["period"].dropna().astype("string")
 
-    expected_periods = set(expected_periods)
+    actual_periods = set(period_series)
+    expected_period_set = set(expected_periods)
 
-    missing_periods = sorted(expected_periods - actual_periods)
+    missing_periods = sorted(expected_period_set - actual_periods)
 
-    unexpected_periods = sorted(actual_periods - expected_periods)
+    unexpected_periods = sorted(actual_periods - expected_period_set)
 
-    print(f"預期季度數：{len(expected_periods)}")
-    print(f"實際季度數：{len(actual_periods)}")
+    # 每季資料筆數，包含預期範圍外的季度
+    period_counts = (
+        period_series
+        .value_counts()
+        .rename_axis("period")
+        .rename("transaction_count"))
+
+    # 建立完整的預期季度清單；沒有資料的季度顯示為 0
+    coverage_df = pd.DataFrame({"period": expected_periods})
+
+    coverage_df = coverage_df.merge(
+        period_counts.reset_index(),
+        on="period",
+        how="left")
+
+    coverage_df["transaction_count"] = (
+        coverage_df["transaction_count"].fillna(0).astype(int))
+
+    print(f"Expected quarters: {len(expected_periods)}")
+    print(f"Observed quarters: {len(actual_periods)}")
+
+    print("\n--- Quarterly row counts ---")
+    print(coverage_df.to_string(index=False))
 
     if missing_periods:
-        print("\n! 缺少季度：")
+        print("\nMissing quarters:")
         print(missing_periods)
     else:
-        print("\nV 沒有缺少季度")
+        print("\nNo missing quarters.")
 
     if unexpected_periods:
-        print("\n! 預期範圍外季度：")
+        print("\nUnexpected quarters:")
         print(unexpected_periods)
-
-    coverage_complete = (
-        not missing_periods
-        and not unexpected_periods)
-
-    if coverage_complete:
-        print("\nV Transaction period coverage complete")
     else:
-        print("\n! Transaction period coverage incomplete")
+        print("\nNo unexpected quarters.")
+
+    coverage_complete = (not missing_periods and not unexpected_periods)
+
+    print(
+        "\nQuarter presence check: "
+        + ("PASS" if coverage_complete else "INCOMPLETE"))
 
     return {
-        "expected_periods": sorted(expected_periods),
+        "expected_periods": list(expected_periods),
         "actual_periods": sorted(actual_periods),
         "missing_periods": missing_periods,
         "unexpected_periods": unexpected_periods,
-        "coverage_complete": coverage_complete,}
+        "coverage_complete": coverage_complete,
+        "quarterly_counts": coverage_df}
 
 
 # Validate data quality after type conversion
@@ -837,26 +944,33 @@ def validate_data_quality(df, name):
             "source_file"]].to_string(index=False))
 
     # --------------------------------------------------
-    # 3. Invalid total prices 無效總價元
+    # 3. Missing and invalid total prices
     # --------------------------------------------------
 
-    invalid_total_price = (df["總價元"].notna() & (df["總價元"] <= 0)).sum()
+    missing_total_price = df["總價元"].isna().sum()
 
+    invalid_total_price = (
+        df["總價元"].notna()
+        & (df["總價元"] <= 0)).sum()
+
+    print(f"Missing total prices: {missing_total_price}")
     print(f"Non-positive total prices: {invalid_total_price}")
 
-    invalid_total_price_rows = df[df["總價元"].notna() & (df["總價元"] <= 0)].copy()
+    invalid_total_price_rows = df[
+        df["總價元"].notna()
+        & (df["總價元"] <= 0)].copy()
 
     if not invalid_total_price_rows.empty:
         print("\n--- Non-positive total price records ---")
         print(invalid_total_price_rows[[
-            "交易年月日",
-            "鄉鎮市區",
-            "交易標的",
-            "土地位置建物門牌",
-            "總價元",
-            "單價元平方公尺",
-            "編號",
-            "source_file"]].to_string(index=False))
+                    "交易年月日",
+                    "鄉鎮市區",
+                    "交易標的",
+                    "土地位置建物門牌",
+                    "總價元",
+                    "單價元平方公尺",
+                    "編號",
+                    "source_file"]].to_string(index=False))
 
     # --------------------------------------------------
     # 4. Invalid unit prices 無效單價元平方公尺
@@ -938,10 +1052,10 @@ def validate_data_quality(df, name):
     print("\n--- Unit Price Quality ---")
     print(unit_price_quality)
 
-# 函式: 定義"不動產買賣"、"預售屋買賣"
+# 函式: 定義"不動產(成屋)買賣"、"預售屋買賣"
 def filter_residential_transactions(df):
 
-    # 不將單獨的土地、車位、建物納入不動產平均單價計算
+    # 不將單獨的土地、車位、建物納入平均單價計算
     residential_types = ["房地(土地+建物)", "房地(土地+建物)+車位"]
 
     residential_df = df[df["交易標的"].isin(residential_types)].copy()
@@ -949,7 +1063,7 @@ def filter_residential_transactions(df):
     return residential_df
 
 
-# 函式: 六都房價分析可用的不動產與預售屋買賣資料品質確認
+# 函式: 六都房價分析可用的不動產(成屋)與預售屋買賣資料品質確認
 def filter_analysis_eligible_transactions(df,
                                           start_date=ANALYSIS_START_DATE,
                                           cutoff_date=ANALYSIS_CUTOFF_DATE):
@@ -1013,23 +1127,31 @@ def filter_six_municipalities(df):
 # 六都住宅交易季度整合與 Parquet 輸出
 # ============================================================
 
+TRANSACTION_TYPES = ["成屋買賣", "預售屋買賣"]
+
 def aggregate_quarterly_transactions(df):
     """
-    依季度與六都彙總住宅交易資料
+    Aggregate quarterly residential transaction prices.
 
-    Output columns:
+    Output:
     - period
     - municipality
+    - transaction_type
     - avg_unit_price
     - median_unit_price
     - transaction_count
+    - data_status
 
     單價單位：新臺幣元／平方公尺
+
+    transaction_count = 0 代表目前資料中沒有符合彙總條件的交易，
+    而非該季度無實際交易。
     """
 
     required_columns = [
         "period",
         "municipality",
+        "transaction_type",
         "單價元平方公尺"]
 
     missing_columns = [
@@ -1043,33 +1165,67 @@ def aggregate_quarterly_transactions(df):
 
     # 確保單價為數值
     analysis_df["單價元平方公尺"] = pd.to_numeric(
-        analysis_df["單價元平方公尺"],errors="coerce")
+        analysis_df["單價元平方公尺"],
+        errors="coerce")
 
-    # 排除無效資料
+    # 僅保留有效季度、六都、已定義的交易類型與正數單價
     analysis_df = analysis_df[
-        analysis_df["period"].notna()
+        analysis_df["period"].isin(
+            pd.period_range(
+                start=ANALYSIS_START_PERIOD,
+                end=ANALYSIS_END_PERIOD,
+                freq="Q").astype(str))
         & analysis_df["municipality"].isin(SIX_MUNICIPALITIES)
+        & analysis_df["transaction_type"].isin(TRANSACTION_TYPES)
         & analysis_df["單價元平方公尺"].notna()
         & (analysis_df["單價元平方公尺"] > 0)].copy()
 
-    # 依季度、縣市彙總平均單價、成交筆數
-    quarterly_df = (analysis_df
-        .groupby(
-            ["period", "municipality"],
-            as_index=False)
-        .agg(
-            avg_unit_price=(
-                "單價元平方公尺",
-                "mean"),
-            median_unit_price=(
-                "單價元平方公尺",
-                "median"),
-            transaction_count=(
-                "單價元平方公尺",
-                "size"))
-        .sort_values(["period", "municipality"]).reset_index(drop=True))
+    group_columns = [
+        "period",
+        "municipality",
+        "transaction_type"]
 
-    return quarterly_df
+    # 先彙總實際存在的交易組合
+    observed_df = (analysis_df
+        .groupby(group_columns, as_index=False)
+        .agg(
+            avg_unit_price=("單價元平方公尺", "mean"),
+            median_unit_price=("單價元平方公尺", "median"),
+            transaction_count=("單價元平方公尺", "size")))
+
+    # 建立完整的季度 × 六都 × 交易類型組合
+    expected_periods = pd.period_range(
+        start=ANALYSIS_START_PERIOD,
+        end=ANALYSIS_END_PERIOD,
+        freq="Q").astype(str)
+
+    full_index = pd.MultiIndex.from_product(
+        [expected_periods,
+         SIX_MUNICIPALITIES,
+         TRANSACTION_TYPES],
+         names=group_columns)
+
+    full_df = (
+        observed_df
+        .set_index(group_columns)
+        .reindex(full_index)
+        .reset_index())
+
+    # 只有交易筆數可以安全地填 0
+    full_df["transaction_count"] = (
+        full_df["transaction_count"]
+        .fillna(0)
+        .astype(int))
+
+    # 不把缺少交易的平均單價、中位數填成 0
+    full_df["data_status"] = full_df[
+        "transaction_count"].map({
+        0: "no_eligible_transactions"}).fillna("available")
+
+    full_df = full_df.sort_values(
+        ["period", "municipality", "transaction_type"]).reset_index(drop=True)
+
+    return full_df
 
 
 def export_quarterly_parquet(df,output_path=OUTPUT_PARQUET):
@@ -1114,6 +1270,20 @@ def export_quarterly_csv(df):
     print(f"CSV exported: {OUTPUT_CSV}")
     print(f"Rows: {len(df)}")
 
+
+def log_row_count(stage: str, df: pd.DataFrame, previous_count: int | None = None):
+    """記錄各處理階段的資料筆數與排除筆數。"""
+    current_count = len(df)
+
+    # previous_count：上一階段筆數；不提供時只記錄目前筆數
+    if previous_count is None:
+        logger.info(f"[筆數對帳] {stage}：{current_count:,} 筆")
+    else:
+        excluded_count = previous_count - current_count
+        logger.info(
+            f"[筆數核對] {stage}：{current_count:,} 筆；"
+            f"本階段減少 {excluded_count:,} 筆")
+
 # ============================================================
 # Main
 # ============================================================
@@ -1127,11 +1297,14 @@ if __name__ == "__main__":
     df_a = load_all_a_csv()
     df_b = load_all_b_csv()
 
+    log_row_count("A csv載入完成", df_a)
+    log_row_count("B csv載入完成", df_b)
+
     # -----------------------------------------
     # 2. Validate schema
     # -----------------------------------------
 
-    validate_dataframe(df_a,"A",expected_transaction_type="不動產買賣")
+    validate_dataframe(df_a,"A",expected_transaction_type="成屋買賣")
     validate_dataframe(df_b,"B",expected_transaction_type="預售屋買賣")
 
     # -----------------------------------------
@@ -1148,8 +1321,14 @@ if __name__ == "__main__":
     # 4. Remove exact duplicates
     # -----------------------------------------
 
+    a_before = len(df_a)
+    b_before = len(df_b)
+
     df_a = remove_exact_duplicates(df_a, "A")
     df_b = remove_exact_duplicates(df_b, "B")
+
+    log_row_count("A csv 去重後", df_a, a_before)
+    log_row_count("B csv 去重後", df_b, b_before)
 
     # -----------------------------------------
     # 5. Convert data types
@@ -1176,20 +1355,20 @@ if __name__ == "__main__":
     # 8. Residential transaction filter
     # -----------------------------------------
 
+    before_count = len(df_a)
     df_a_residential = filter_residential_transactions(df_a)
+    log_row_count("A 類住宅交易篩選後", df_a_residential,before_count)  # 實際篩選結果放在 df_a_residential
+
+    before_count = len(df_b)
     df_b_residential = filter_residential_transactions(df_b)
+    log_row_count("B 類住宅交易篩選後", df_b_residential, before_count) # 實際篩選結果放在 df_b_residential
 
     print("\n" + "=" * 70)
     print("Residential Transactions")
     print("=" * 70)
 
-    print(
-        f"A residential transactions: "
-        f"{len(df_a_residential):,}")
-
-    print(
-        f"B residential transactions: "
-        f"{len(df_b_residential):,}")
+    print(f"A residential transactions: "f"{len(df_a_residential):,}")
+    print(f"B residential transactions: "f"{len(df_b_residential):,}")
 
     # -----------------------------------------
     # 9. Future-dated residential transactions
@@ -1266,8 +1445,13 @@ if __name__ == "__main__":
     # 11. Analysis eligibility
     # -----------------------------------------
 
+    before_count = len(df_a_residential)
     df_a_analysis = filter_analysis_eligible_transactions(df_a_residential)
+    log_row_count("A 類分析資格篩選後", df_a_analysis, before_count)  # 實際結果放在 df_a_analysis
+
+    before_count = len(df_b_residential)
     df_b_analysis = filter_analysis_eligible_transactions(df_b_residential)
+    log_row_count("B 類分析資格篩選後", df_b_analysis, before_count)  # 實際結果放在 df_b_analysis
 
     print("\n" + "=" * 70)
     print("Analysis-Eligible Transactions")
@@ -1283,85 +1467,61 @@ if __name__ == "__main__":
     # 12. Six municipalities
     # -----------------------------------------
 
+    # A 類：六都篩選及筆數對帳
+    a_before = len(df_a_analysis)
+
     six_city_a_analysis = filter_six_municipalities(df_a_analysis)
+
+    log_row_count("A 類六都篩選後", six_city_a_analysis, a_before)
+
+    # B 類：六都篩選及筆數對帳
+    b_before = len(df_b_analysis)
+
     six_city_b_analysis = filter_six_municipalities(df_b_analysis)
 
-    print("\n" + "=" * 70)
-    print("Six Municipalities")
-    print("=" * 70)
+    log_row_count("B 類六都篩選後", six_city_b_analysis, b_before)
 
-    print("\nA:")
-    print(
-        six_city_a_analysis["municipality"]
-        .value_counts()
-        .sort_index())
-
-    print("\nB:")
-    print(
-        six_city_b_analysis["municipality"]
-        .value_counts()
-        .sort_index())
 
     # -----------------------------------------
     # 13. Combine A and B analysis data for further analysis
     # -----------------------------------------
 
-    six_city_analysis = pd.concat([six_city_a_analysis,
-                                   six_city_b_analysis],
-                                   ignore_index=True)
+    six_city_analysis = pd.concat([six_city_a_analysis, six_city_b_analysis], ignore_index=True)
 
-    print("\n" + "=" * 70)
-    print("Combined Six-Municipality Analysis Data")
-    print("=" * 70)
+    # 記錄合併後的總筆數
+    log_row_count("A、B 類六都資料合併後", six_city_analysis)
 
-    print(f"Total six-municipality analysis rows: "
-          f"{len(six_city_analysis):,}")
+    # 驗證合併後筆數是否等於A類 + B類
+    expected_count = (len(six_city_a_analysis) + len(six_city_b_analysis))
 
-    print("\nTransaction type:")
-    print(six_city_analysis["transaction_type"].value_counts())
+    actual_count = len(six_city_analysis)
 
-    # -----------------------------------------
-    # 14. Quarterly six-municipality aggregation 季度 x 六都
-    # -----------------------------------------
+    if actual_count != expected_count:
+        raise ValueError(
+            "A、B 類資料合併後筆數不一致："
+            f"預期 {expected_count:,} 筆，"
+            f"實際 {actual_count:,} 筆")
 
-    quarterly_six_city = (six_city_analysis
-                          .groupby(["period", "municipality"],as_index=False)
-                          .agg(avg_unit_price=("單價元平方公尺","mean"),
-                               transaction_count=("編號","count"))
-                               .sort_values(["period", "municipality"]))
-
-    print("\n" + "=" * 70)
-    print("Quarterly Six-Municipality Analysis")
-    print("=" * 70)
-
-    print(quarterly_six_city.head(20).to_string(index=False))
-
+    logger.success(f"A、B 類資料合併筆數驗證通過："f"{actual_count:,} 筆")
 
     # -----------------------------------------
     # A + B → Quarterly Aggregation → Parquet
     # -----------------------------------------
-
-    # 1. 合併不動產買賣 A 與預售屋買賣 B
-    six_city_analysis = pd.concat([six_city_a_analysis,
-                                   six_city_b_analysis],ignore_index=True)
-
+    # 前面已合併 A/B，以下沿用既有的 DataFrame
     print("\n========== Combine A/B ==========")
     print(f"A 資料筆數：{len(six_city_a_analysis):,}")
     print(f"B 資料筆數：{len(six_city_b_analysis):,}")
     print(f"合併後筆數：{len(six_city_analysis):,}")
 
-
-    # 2. 依季度與六都整合
+    # 依季度、縣市、交易類型彙總
     quarterly_six_city = aggregate_quarterly_transactions(six_city_analysis)
+    log_row_count("季度彙總完成", quarterly_six_city)  # 單純記錄輸出筆數
 
     print("\n========== Quarterly Aggregation ==========")
     print(quarterly_six_city.head(10).to_string(index=False))
 
-
-    # 3. Export Parquet
+    # 輸出 Parquet and CSV
     export_quarterly_parquet(quarterly_six_city)
-
-    # 4. Export csv
     export_quarterly_csv(quarterly_six_city)
 
     # --------------------------------------------------------

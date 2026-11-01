@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <style>
+    body { font-family: "Segoe UI", "Noto Sans TC", sans-serif; margin: 0; background: #f4f1ea; color: #1c1915; }
+    main { max-width: 720px; margin: 32px auto; padding: 0 16px 48px; }
+    h1 { font-size: 28px; margin-bottom: 4px; }
+    p.lead { color: #5c564c; margin-top: 0; }
+    form, .result { background: #fff; border: 1px solid #e4ddd0; border-radius: 12px; padding: 20px; }
+    label { display: block; font-size: 14px; margin: 12px 0 4px; }
+    select, input { width: 100%; box-sizing: border-box; padding: 10px 12px; border: 1px solid #d9d0c3; border-radius: 8px; font-size: 16px; }
+    button { margin-top: 16px; background: #1f4d3a; color: #fff; border: 0; border-radius: 8px; padding: 12px 18px; font-size: 16px; cursor: pointer; }
+    button:disabled { opacity: 0.6; }
+    .result { margin-top: 16px; }
+    .error { color: #8d2b2b; }
+    table { width: 100%; border-collapse: collapse; }
+    td { padding: 8px 0; border-bottom: 1px solid #eee; }
+    td:last-child { text-align: right; font-variant-numeric: tabular-nums; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>ETF 頭期款試算</h1>
+    <p class="lead">選擇城市和 ETF，看每月要存多少，10 年後才付得起頭期款。</p>
+    <form id="form">
+      <label for="city">城市</label>
+      <select id="city" required></select>
+      <label for="etf">ETF</label>
+      <select id="etf" required></select>
+      <label for="years">投資年數</label>
+      <input id="years" type="number" min="1" max="40" value="10">
+      <label for="monthly">每月投入（元，0 表示只算需要存多少）</label>
+      <input id="monthly" type="number" min="0" step="1000" value="20000">
+      <button id="submit" type="submit">試算</button>
+    </form>
+    <section id="result" class="result" hidden></section>
+  </main>
+  <script>
+    var form = document.getElementById("form");
+    var result = document.getElementById("result");
+    var submit = document.getElementById("submit");
+
+    function money(value) {
+      return Number(value).toLocaleString("zh-TW");
+    }
+
+    google.script.run.withSuccessHandler(function (data) {
+      var city = document.getElementById("city");
+      var etf = document.getElementById("etf");
+      data.cities.forEach(function (name) {
+        var option = document.createElement("option");
+        option.value = name;
+        option.textContent = name;
+        city.appendChild(option);
+      });
+      data.etfs.forEach(function (row) {
+        var option = document.createElement("option");
+        option.value = row.stock_id;
+        option.textContent = row.stock_id + "（" + row.cagr_pct + "%）";
+        if (row.stock_id === "0050") option.selected = true;
+        etf.appendChild(option);
+      });
+    }).withFailureHandler(showError).listChoices();
+
+    form.addEventListener("submit", function (event) {
+      event.preventDefault();
+      submit.disabled = true;
+      result.hidden = false;
+      result.innerHTML = "<p>計算中…</p>";
+      google.script.run.withSuccessHandler(function (row) {
+        submit.disabled = false;
+        var enough = row.accumulated >= row.downPayment;
+        var lines = [
+          ["資料", row.period + "（" + row.source + "）"],
+          ["房價", money(row.housePriceWan) + " 萬元"],
+          ["頭期款", money(row.downPayment) + " 元"],
+          [row.etf + " 年化", row.cagrPct + "%"],
+          ["每月需投入", money(row.monthlyNeeded) + " 元"],
+          ["每月需投入（保守 7%）", money(row.monthlyNeededConservative) + " 元"]
+        ];
+        if (Number(document.getElementById("monthly").value) > 0) {
+          lines.push(["每月投入後可累積", money(row.accumulated) + " 元"]);
+          lines.push(["是否付得起", enough ? "可付" : "不足"]);
+        }
+        result.innerHTML = "<table>" + lines.map(function (line) {
+          return "<tr><td>" + line[0] + "</td><td>" + line[1] + "</td></tr>";
+        }).join("") + "</table>";
+      }).withFailureHandler(function (err) {
+        submit.disabled = false;
+        showError(err);
+      }).calculate({
+        city: document.getElementById("city").value,
+        etf: document.getElementById("etf").value,
+        years: document.getElementById("years").value,
+        monthly: document.getElementById("monthly").value
+      });
+    });
+
+    function showError(err) {
+      result.hidden = false;
+      result.innerHTML = "<p class=\"error\">" + (err.message || err) + "</p>";
+    }
+  </script>
+</body>
+</html>

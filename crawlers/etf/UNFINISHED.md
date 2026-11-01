@@ -1,35 +1,77 @@
-# 第 5 次專題目標
+# 依課程講義尚未完成的清單
 
-## 1. Airflow 改成自己的，且 build Docker image
+順序跟 `crawlers/finmind/docs/course-notes.md` 的學習順序、啟動順序相同。已完成的打勾，剩下的由上往下做。
 
-- [x] `dags/etf_etl_dag.py`、`docker/Dockerfile` 已有。本機 `docker compose` 可建出 image。
-- [ ] image 名稱仍是 `your-dockerhub-account/etf-crawler:0.0.1`，尚未改成自己的 Docker Hub 帳號，也尚未 `docker push`。
-- [ ] DAG 的 owner、image 要改成自己的；Airflow Variable `mysql_password` 尚未設定。
+## 已經在跑
 
-## 2. Airflow 結合 producer、Celery，定時發送任務
+- [x] Python 3.11、uv、環境變數連線。
+- [x] MySQL 與 phpMyAdmin（`docker/docker-compose.yml`，埠 3306、8080）。
+- [x] 爬蟲直接寫進 MySQL（`etf_to_mysql.py`）。這一步在講義裡是 Celery 任務，目前還是一支程式直接寫。
+- [x] 基本 Dockerfile，本機可以 build。
+- [x] 頭期款試算、Redash、程式與 yml 已在 GitHub。
 
-- [x] `etf_producer.py`、`etf_tasks.py`、`etf_worker.py` 已有。排程時間訂為週一到週五 15:00。
-- [ ] DAG 現在是直接跑 `etf_to_mysql.py`，沒有呼叫 producer，也沒有把任務送進 Celery。
-- [ ] producer → RabbitMQ → worker 尚未在有 RabbitMQ 的環境跑過。
-- [ ] 這條流程尚未在 Airflow 裡定時觸發成功。
+## 1. 環境設定
 
-## 3. Redash 畫圖
+- [x] `genenv.py` 依 DEV 以外的 `DOCKER`、`PRODUCTION` 讀 `local.ini` 產生 `.env`。範本是 `local.ini.example`，密碼不要提交。
 
-- [x] 試算結果已寫入 `etf_cagr`、`goal_down_payment`。
-- [x] Redash 可調單一 ETF、頭期款比例、年數、每月投入。見 README。
+## 2. Worker 與 Task
 
-## 4. code、yml 上傳 GitHub
+- [x] `etf_worker.py`、`etf_tasks.py` 已有。
+- [x] RabbitMQ 與 Flower 已可啟動。Flower 在 http://localhost:5555 ，RabbitMQ 管理畫面在 http://localhost:15672 。
+- [x] Worker 連上 RabbitMQ。上市 worker 收到 0050 後寫入 2917 筆股價。
 
-- [x] 程式、`docker/docker-compose.yml`、`swarm.yml`、DAG 已在 `main`。
+## 3. Producer
 
-## 5. 架構圖更新、README 更新
+- [x] `etf_producer.py` 依市場把任務送到 `twse` 或 `tpex`。
+- [x] 已實際派送，worker 寫進 MySQL。
 
-- [x] `README.md` 已寫團隊目錄、Docker、試算與 Redash 操作。
-- [ ] README 尚未寫 Airflow、Celery。
+## 4. 爬蟲任務本體
+
+- [x] `etf.crawl_one` 重用 `etf_to_mysql.py` 的抓價與寫入。0050、006201 都回報 succeeded。
+
+## 5. 多 queue
+
+- [x] 上市 `twse`、上櫃 `tpex` 各一個 worker。006201 由上櫃 worker 寫入。
+
+## 6. Scheduler
+
+- [x] `etf_scheduler.py` 改為呼叫 producer。時間仍是週一到週五 15:00。
+- [ ] 排程容器尚未在 15:00 自動觸發過。可用 `--profile schedule` 啟動後再觀察。
+
+## 7. Compose：worker、producer、scheduler
+
+- [x] `docker/celery-compose.yml` 含 RabbitMQ、Flower、兩個 worker、producer、scheduler。
+- [x] 啟動順序：先起 MySQL，再起這個 compose，然後用 `--profile dispatch` 派送。
+
+## 8. Docker image
+
+- [x] 基本版之外，已有 `docker/with.env.Dockerfile`、`docker/prod.with.env.Dockerfile`。build 時用 `local.ini.example` 產生 `.env`，正式密碼要自己改。
+- [ ] image 名稱改成自己的 Docker Hub 帳號。現在仍是 `your-dockerhub-account/etf-crawler:0.0.1`。
+- [ ] `docker push`。DAG 與 `swarm.yml` 的 image、owner 改成同一個帳號。
+
+## 9. Swarm
+
+- [x] `swarm.yml` 已有（ETF 爬蟲，等 image 推上 Docker Hub 再部署）。
+- [x] `docker/portainer.yml` 已有。GCP 這一階段只部署 Swarm 與 Portainer。
+- [ ] 在 GCP VM 執行 `docker swarm init`，再開防火牆 9000，然後 `docker stack deploy -c docker/portainer.yml portainer`。
+- [ ] 建立 overlay 網路，用已 push 的 image 部署爬蟲。節點需要 `etf_crawler` 標籤。這一步排在 Portainer 之後。
+
+## 10. Airflow
+
+- [x] `dags/etf_etl_dag.py` 已有，週一到週五 15:00。
+- [ ] DAG 改成送進 producer，而不是直接跑抓價 image。
+- [ ] 設定 Airflow Variable `mysql_password`。
+- [ ] 在 Airflow 裡定時觸發成功一次。
+- [ ] README 補上 Airflow、Celery 的操作說明。
+
+## 11. 講義最後一節：GCP
+
+這段在 FinMind 範例裡，ETF 試算目前沒有用到。
+
+- [ ] `gcloud` 登入並設定專案。
+- [ ] 股價上傳 BigQuery。
+- [ ] Secret Manager 讀取密鑰。
+
+## 文件
+
 - [ ] 架構圖尚未更新並上傳。
-
-## 仍待團隊資料
-
-- [ ] 團隊 MySQL、RabbitMQ 的主機與帳密。
-- [ ] `stock.etf_list`（`stock_id`、`market`）。讀不到時目前改走 FinMind。
-- [x] 六都房價。`housing.city_house_price` 為 2026Q3 住宅成交總價中位數；讀不到時試算才用手填粗估。

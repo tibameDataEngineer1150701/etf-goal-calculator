@@ -48,8 +48,7 @@ services:
     environment:
       PMA_HOST: mysql
       PMA_PORT: "3306"
-      PMA_USER: root
-      PMA_PASSWORD: rootpass
+      # 不預填帳號。組員用 etfgoal / etfgoal，本機管理仍可用 root / rootpass。
     ports:
       - "8080:80"
     depends_on:

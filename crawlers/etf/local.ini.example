@@ -1,0 +1,32 @@
+[DEFAULT]
+mysql_host = 127.0.0.1
+mysql_port = 3306
+mysql_user = root
+mysql_password = change-me
+mysql_db = etf
+rabbitmq_host = 127.0.0.1
+rabbitmq_port = 5672
+rabbitmq_user = worker
+rabbitmq_password = worker
+
+[DOCKER]
+mysql_host = mysql
+mysql_port = 3306
+mysql_user = root
+mysql_password = change-me
+mysql_db = etf
+rabbitmq_host = rabbitmq
+rabbitmq_port = 5672
+rabbitmq_user = worker
+rabbitmq_password = worker
+
+[PRODUCTION]
+mysql_host = mysql
+mysql_port = 3306
+mysql_user = root
+mysql_password = change-me
+mysql_db = etf
+rabbitmq_host = rabbitmq
+rabbitmq_port = 5672
+rabbitmq_user = worker
+rabbitmq_password = worker

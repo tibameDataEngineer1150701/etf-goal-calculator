@@ -1,4 +1,5 @@
-# 把「被動式 ETF」的股價 / 除權息 / 分割 寫進 MySQL（三張表都寫）
+# 把被動式 ETF 的還原收盤寫進 MySQL 的 etf_price。
+# 除權息與分割已經含在 adj_close，不再另外寫表。
 # 流程：讀 stock.etf_list(組員 篩好的清單) → 逐檔 Yahoo 抓價(依市場給後綴) → 寫入 MySQL
 #   （若讀不到 DB 清單，會自動改用 etf_universe 現抓 FinMind 當備援）
 #
@@ -85,29 +86,6 @@ def parse_prices(stock_id, data):
     return pd.DataFrame(rows)
 
 
-def parse_dividends(stock_id, data):
-    result = data["chart"]["result"][0]
-    rows = []
-    if "events" in result and "dividends" in result["events"]:
-        dividends = result["events"]["dividends"]
-        for key in dividends:
-            item = dividends[key]
-            rows.append({"stock_id": stock_id, "ex_date": get_date_text(item["date"]), "amount": item["amount"]})
-    return pd.DataFrame(rows)
-
-
-def parse_splits(stock_id, data):
-    result = data["chart"]["result"][0]
-    rows = []
-    if "events" in result and "splits" in result["events"]:
-        splits = result["events"]["splits"]
-        for key in splits:
-            item = splits[key]
-            rows.append({"stock_id": stock_id, "split_date": get_date_text(item["date"]),
-                         "numerator": item["numerator"], "denominator": item["denominator"], "ratio": item["splitRatio"]})
-    return pd.DataFrame(rows)
-
-
 def save(df, sql):
     # 共用寫入：批次寫入 + 交易保護
     if df is None or len(df) == 0:
@@ -133,20 +111,6 @@ def save_prices(df):
     return save(df, sql)
 
 
-def save_dividends(df):
-    sql = ("insert into etf_dividend (stock_id, ex_date, amount) "
-           "values (%(stock_id)s, %(ex_date)s, %(amount)s) "
-           "on duplicate key update amount = values(amount)")
-    return save(df, sql)
-
-
-def save_splits(df):
-    sql = ("insert into etf_split (stock_id, split_date, numerator, denominator, ratio) "
-           "values (%(stock_id)s, %(split_date)s, %(numerator)s, %(denominator)s, %(ratio)s) "
-           "on duplicate key update numerator=values(numerator), denominator=values(denominator), ratio=values(ratio)")
-    return save(df, sql)
-
-
 def main():
     # 優先讀 組員 的 stock.etf_list；讀不到才改用 etf_universe 現抓 FinMind（備援）
     try:
@@ -163,8 +127,6 @@ def main():
 
     print("準備寫入", len(etfs), "檔被動式 ETF 到 MySQL ...")
     total_p = 0
-    total_d = 0
-    total_s = 0
     failed = []
     i = 0
     for e in etfs:
@@ -174,8 +136,6 @@ def main():
         try:
             data = fetch_chart(stock_id, market)       # 依市場給 .TW / .TWO
             total_p = total_p + save_prices(parse_prices(stock_id, data))
-            total_d = total_d + save_dividends(parse_dividends(stock_id, data))
-            total_s = total_s + save_splits(parse_splits(stock_id, data))
         except Exception as err:
             failed.append(stock_id)                    # 單檔失敗不中斷整批
             print("  ⚠", stock_id, "失敗：", str(err)[:60])
@@ -183,7 +143,7 @@ def main():
         if i % 20 == 0:
             print("  進度", i, "/", len(etfs))
 
-    print("完成：股價", total_p, "筆、除權息", total_d, "筆、分割", total_s, "筆 已寫入 MySQL")
+    print("完成：股價", total_p, "筆已寫入 MySQL")
     if failed:
         print("失敗", len(failed), "檔：", failed)
 

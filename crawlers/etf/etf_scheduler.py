@@ -5,18 +5,18 @@
 #   export MYSQL_HOST=... MYSQL_USER=... MYSQL_PASSWORD=... MYSQL_DB=etf ETF_LIST_DB=stock
 #   uv run python etf_scheduler.py        # 會持續執行，依排程定時更新
 
-import etf_to_mysql                       # 匯入主程式（有 if __name__ 保護，不會自動執行）
+import etf_producer
 from apscheduler.schedulers.blocking import BlockingScheduler
 from loguru import logger
 
 
 def job():
-    logger.info("開始定時抓取 ETF，更新 MySQL ...")
+    logger.info("開始派送 ETF 任務到 RabbitMQ ...")
     try:
-        etf_to_mysql.main()               # 讀 stock.etf_list → 抓價 → 寫 etf_price
-        logger.info("ETF 更新完成")
+        etf_producer.main()               # 讀 stock.etf_list → 送到 twse / tpex queue
+        logger.info("ETF 任務已派送")
     except Exception as err:
-        logger.error(f"ETF 更新失敗：{err}")
+        logger.error(f"ETF 派送失敗：{err}")
 
 
 scheduler = BlockingScheduler(timezone="Asia/Taipei")

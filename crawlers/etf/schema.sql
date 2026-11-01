@@ -13,23 +13,7 @@ CREATE TABLE IF NOT EXISTS etf_price (
     PRIMARY KEY (stock_id, `date`)                -- 同一檔同一天只會有一筆（避免重複）
 );
 
--- 2) 除權息紀錄（輔助表）
-CREATE TABLE IF NOT EXISTS etf_dividend (
-    stock_id  VARCHAR(16)   NOT NULL,
-    ex_date   DATE          NOT NULL,             -- 除息日
-    amount    DECIMAL(12,6) NOT NULL,             -- 每股配發金額
-    PRIMARY KEY (stock_id, ex_date)
-);
-
--- 3) 分割紀錄（輔助表；台股 ETF 常已還原，可能沒有資料）
-CREATE TABLE IF NOT EXISTS etf_split (
-    stock_id     VARCHAR(16) NOT NULL,
-    split_date   DATE        NOT NULL,
-    numerator    DECIMAL(12,4),                   -- 分割比例分子
-    denominator  DECIMAL(12,4),                   -- 分割比例分母
-    ratio        VARCHAR(16),                     -- 如 "4:1"
-    PRIMARY KEY (stock_id, split_date)
-);
+-- 還原收盤已含除權息與分割，不再另建 etf_dividend、etf_split。
 
 -- ── 以下為 goal_calculator.py 的輸出表（給 Redash 畫 dashboard 用）──
 
@@ -78,6 +62,22 @@ ON DUPLICATE KEY UPDATE
     period = VALUES(period),
     median_total_wan = VALUES(median_total_wan);
 
+-- 組員 Build_Down_Payment_Target.py 的輸出。上傳程式會 append 這張表，這裡只建空表。
+-- 試算讀成屋買賣、中性。house_price、down_payment_target 單位是元。
+CREATE TABLE IF NOT EXISTS housing.down_pmt_target (
+    house_price_period    VARCHAR(16),
+    growth_period         VARCHAR(16),
+    region                VARCHAR(16),
+    transaction_type      VARCHAR(16),
+    scenario              VARCHAR(16),
+    house_price           DOUBLE,
+    hpi_growth            DOUBLE,
+    forecast_years        INT,
+    down_payment_ratio    DOUBLE,
+    future_house_price    DOUBLE,
+    down_payment_target   DOUBLE
+) ENGINE=InnoDB CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+
 -- 5) 六都頭期款試算結果
 CREATE TABLE IF NOT EXISTS goal_down_payment (
     city                         VARCHAR(16) NOT NULL,   -- 城市
@@ -90,3 +90,11 @@ CREATE TABLE IF NOT EXISTS goal_down_payment (
     computed_at                  DATETIME,
     PRIMARY KEY (city)
 );
+
+-- 組員直接連線用的帳號。可讀寫 etf、stock、housing，不使用 root。
+-- 已存在的資料庫不會重跑這個檔，要在現有 MySQL 再執行一次這段。
+CREATE USER IF NOT EXISTS 'etfgoal'@'%' IDENTIFIED BY 'etfgoal';
+GRANT ALL PRIVILEGES ON etf.* TO 'etfgoal'@'%';
+GRANT ALL PRIVILEGES ON stock.* TO 'etfgoal'@'%';
+GRANT ALL PRIVILEGES ON housing.* TO 'etfgoal'@'%';
+FLUSH PRIVILEGES;
