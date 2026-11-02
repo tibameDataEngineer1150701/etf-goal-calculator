@@ -262,10 +262,9 @@ def normalize_cpi_base_year(
 
     print(f"\nCPI 基期年度：{base_year}")
     print(f"CPI 基期年度平均：{base_average:.6f}")
-    print(
-        f"CPI {base_year} 年平均標準化後："
-        f"{cpi.loc[cpi['period'].isin(base_periods), 
-                   'cpi_2016_base100'].mean():.6f}")
+    normalized_mean = cpi.loc[
+        cpi["period"].isin(base_periods), "cpi_2016_base100"].mean()
+    print(f"CPI {base_year} 年平均標準化後：{normalized_mean:.6f}")
 
     return cpi
 

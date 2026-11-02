@@ -209,11 +209,11 @@ def clean_cpi(cpi_data: pd.DataFrame) -> pd.DataFrame:
 
         invalid_data["month"] = invalid_data["date"].dt.to_period("M")
 
-        # 以執行當下的月份為基準
+        # 以執行當下的月份為基準。月初時，官方常還沒發布上個月，非正數代表尚未發布。
         current_month = pd.Timestamp.today().to_period("M")
 
-        # 僅將當月或未來月份的非正數視為「可能尚未發布」
-        unpublished_mask = invalid_data["month"] >= current_month
+        # 當月、未來，以及緊鄰的前一個月，非正數視為「可能尚未發布」
+        unpublished_mask = invalid_data["month"] >= (current_month - 1)
 
         unpublished_data = invalid_data.loc[unpublished_mask]
         historical_invalid_data = invalid_data.loc[~unpublished_mask]
@@ -227,7 +227,7 @@ def clean_cpi(cpi_data: pd.DataFrame) -> pd.DataFrame:
         if not unpublished_data.empty:
             unpublished_periods = unpublished_data["period_raw"].tolist()
 
-            print(f"Warning: 排除當月或未來月份的非正數 CPI：{unpublished_periods}")
+            print(f"Warning: 排除尚未發布的非正數 CPI：{unpublished_periods}")
 
             cleaned_cpi = cleaned_cpi.loc[~cleaned_cpi["period_raw"]
                                           .isin(unpublished_periods)].copy()
