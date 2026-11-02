@@ -313,6 +313,11 @@ ORDER BY p.house_price_wan DESC
 
 股價以 `stock_id` + `date` 更新同一筆。`housing_txn_qtr` 是元／平方公尺，試算不拿它當一戶總價。
 
+房價管線：
+
+- `crawlers/housing/crawler/WebCrawler_cpi.py`：主計總處對還沒發布的月份會給 0。當月、未來月份，以及緊鄰的前一個月若是非正數，就視為尚未發布並排除。再更早的月份若出現非正數，仍然中止。2026 年 11 月初實際排除的是 `2026-M10` 和 `2026-M11`，季度 CPI 從 2016Q1 起共 43 季。
+- `crawlers/housing/Real_HPI.py` 已併入組員 `real-estate-hpi-cpi-pipeline` 的 `c10e92a`。各地區官方 HPI 會先換成 2016 年四季平均為 100，再除以同樣基期的 CPI。交易資料以季度、縣市、交易類型當唯一鍵，成屋和預售屋可以同時留著。印出 CPI 平均值的那一行在 Python 3.11 會語法錯誤，已改成先算出平均值再印出，數字相同。檔案末尾多出來的一次執行已拿掉，腳本只跑一輪。
+
 ```sql
 SELECT stock_id, COUNT(*) AS row_count,
        MIN(`date`) AS first_date, MAX(`date`) AS last_date
