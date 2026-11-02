@@ -1,217 +1,95 @@
-# ETF 目標試算
+<p align="center"><strong>中文</strong> | <a href="README.en.md">English</a></p>
 
-用被動式 ETF 的歷史報酬，試算六都頭期款要每月存多少。股價、房價與試算結果都放在 MySQL，圖表用 Redash。
+<h1 align="center">ETF 目標試算</h1>
 
-> **專案狀態：開發中。** 清單、股價入庫、頭期款試算與 Redash 已在本機 MySQL 跑過。本機也可以用 Producer → RabbitMQ → Celery worker 派送；Airflow 仍直接執行抓價程式。Docker Hub 帳號尚未完成。
+<p align="center">用被動式 ETF 的歷史報酬，試算六都頭期款每月要存多少。</p>
 
-## 專案目的與資料範圍
+<p align="center">
+  <a href="https://github.com/tibameDataEngineer1150701/etf-goal-calculator/stargazers"><img alt="GitHub stars" src="https://img.shields.io/github/stars/tibameDataEngineer1150701/etf-goal-calculator?style=flat-square"></a>
+  <img alt="Python 3.11" src="https://img.shields.io/badge/python-3.11-blue?style=flat-square">
+  <img alt="VM" src="https://img.shields.io/badge/VM-e2--medium-green?style=flat-square">
+  <img alt="status" src="https://img.shields.io/badge/status-running-success?style=flat-square">
+</p>
 
-- **ETF 清單**：`stock.etf_list`。欄位用 `stock_id`、`market`（`twse` 或 `tpex`）。程式在 `crawlers/stock`。
-- **股價**：Yahoo Finance chart。上市 `.TW`、上櫃 `.TWO`。只寫入還原收盤 `adj_close`（已含除權息與分割）。
-- **六都房價**：優先讀 `housing.down_pmt_target`（組員以 30 坪換算目前房價，再依房價指數算出 10 年後頭期款）。這張表還沒有資料時，改讀 `housing.city_house_price.median_total_wan` 的住宅成交總價中位數。房市、房價指數與 CPI 的爬蟲在 `crawlers/housing`。
-- **試算輸出**：`etf.etf_cagr`、`etf.goal_down_payment`。
-- **後續應用**：ETF、投資年數與每月投入可在 Redash 調整。頭期款金額優先用組員算出的 `down_payment_target`。
+<p align="center">
+  線上儀表板：<a href="http://34.81.69.39:5000">六都頭期款</a>（登入後在 Dashboards 打開）
+</p>
 
-`crawlers/finmind` 是另一套 FinMind 日線爬蟲，寫入自己的行情表。本專案的報酬計算主要讀取的是etf.etf_price`。
+GCP 機器 `etf-manager`（`asia-east1-b`，`e2-medium`，`34.81.69.39`）已在跑。股價、房價與試算都在 MySQL。週一到週五 15:00（台北時間）由 Swarm 排程抓價。
 
-## 系統架構
+Airflow 沒有安裝。這台是 `e2-medium`，記憶體約 4 GB，已經在跑 MySQL、RabbitMQ、兩個 worker、Flower、Portainer 和 Redash。Airflow 自己的網頁、排程和資料庫就要大約 4 GB，再加上去會把機器撐滿。而且 `etf-jobs` 已經在 15:00 抓同一份清單，DAG 再跑一次只會覆寫同一筆股價。
 
-```text
-[Airflow / etf_scheduler：已有程式，待接上 Celery]
-            |
-            v
-        Producer
-            |
-            v
-         RabbitMQ
-            |
-            v
-       Celery Worker
-            |
-            v
- stock.etf_list → Yahoo Finance chart
-            |
-            v
-      pandas DataFrame
-            |
-            v
-        MySQL etf
-            |
-            v
- goal_calculator ← housing.down_pmt_target（沒有則用 city_house_price）
-            |
-            v
-  etf_cagr / goal_down_payment → Redash
-```
+Image 在 VM 上建置，沒有推上 Docker Hub。抓價和房價都只在這一台機器跑，`docker stack deploy --resolve-image never` 用的是本機 image，不需要從 Docker Hub 拉。Docker Hub 帳號也還沒建好。
 
-目前本機已跑通的是中間這段：`etf_to_mysql.py` 讀 `stock.etf_list`、抓 Yahoo、寫入 MySQL；`goal_calculator.py` 讀股價與六都總價，把試算寫回 MySQL。DAG 仍直接執行 `etf_to_mysql.py`，沒有把任務送進 RabbitMQ。
+## 功能
 
-## 使用技術
-
-| 技術 | 用途 |
-| --- | --- |
-| Python 3.11、uv | 程式開發與套件管理 |
-| FinMind `TaiwanStockInfo` | 組員篩被動式 ETF 清單 |
-| Yahoo Finance chart | 還原收盤 `adj_close` |
-| pandas、PyMySQL、MySQL | 試算與股價、房價儲存 |
-| Celery、RabbitMQ | 本機可派送。上市、上櫃分兩個 queue |
-| Docker Compose | MySQL、phpMyAdmin、抓價、Redash |
-| Airflow | 交易日收盤後的 DAG，image 尚未換成自己的帳號 |
-| Redash | 六都頭期款圖表 |
-
-## 專案檔案
-
-```text
-etf-goal-calculator/
-├── crawlers/
-│   ├── etf/
-│   │   ├── etf_to_mysql.py          # 讀清單、抓價、寫入 MySQL
-│   │   ├── goal_calculator.py       # 報酬與頭期款試算
-│   │   ├── etf_universe.py          # 清單表讀不到時的 FinMind 備援
-│   │   ├── etf_producer.py          # 派送任務
-│   │   ├── etf_tasks.py             # Celery 任務
-│   │   ├── etf_worker.py            # Celery Worker
-│   │   ├── etf_scheduler.py         # 尚未接上 Airflow 的定時更新
-│   │   └── schema.sql               # etf 與 stock.etf_list 建表
-│   ├── stock/                       # ETF 清單爬蟲，寫入 stock.etf_list
-│   ├── housing/                     # 實價登錄、房價指數、CPI
-│   └── finmind/                     # FinMind 日線爬蟲（獨立管線）
-├── dags/etf_etl_dag.py              # 週一到週五 15:00
-├── docker/
-│   ├── Dockerfile
-│   ├── docker-compose.yml           # MySQL、phpMyAdmin、抓價
-│   └── redash-compose.yml
-├── swarm.yml
-└── README.md
-```
-
-## 環境需求與設定
-
-- Python 3.11、[uv](https://docs.astral.sh/uv/)
-- Docker Engine／Docker Desktop 與 Docker Compose
-- 可連線的 MySQL。本機 Compose 使用連接埠 `3306`
-- 可存取 Yahoo Finance 與 FinMind 的網路
-
-在 `crawlers/etf/` 安裝依賴：
-
-```bash
-uv sync
-```
-
-| 變數 | 預設 | 用途 |
+| | | |
 | --- | --- | --- |
-| `MYSQL_HOST`、`MYSQL_PORT` | `localhost`、`3306` | MySQL |
-| `MYSQL_USER`、`MYSQL_PASSWORD` | `root`、空字串 | 帳號密碼。Compose 為 `root` / `rootpass` |
-| `MYSQL_DB` | `etf` | 股價與試算結果 |
-| `ETF_LIST_DB`、`ETF_LIST_TABLE` | `stock`、`etf_list` | 清單來源 |
-| `HOUSING_DB` | `housing` | 六都總價 |
-| `PRIMARY_ETF` | `0050` | 試算用的報酬率 |
-| `DOWN_PAYMENT_RATIO` | `0.2` | 頭期款成數 |
-| `INVEST_YEARS` | `10` | 投資年數 |
-| `MONTHLY_INVEST` | `0` | 大於 0 時另算這筆金額十年後夠不夠 |
-| `ETF_LIMIT` | 不設 | 只抓前 N 檔，用來試跑 |
+| 📈 **股價** | Yahoo 還原收盤 `adj_close`，上市 `.TW`、上櫃 `.TWO` | `etf.etf_price` 約 392,253 筆 |
+| 📋 **清單** | FinMind 篩掉主動式與槓桿反向 | `stock.etf_list` |
+| 🏠 **房價** | 30 坪總價，再依房價指數估 10 年後頭期款 | `housing.down_pmt_target` 36 列 |
+| 🧮 **試算** | 成屋買賣、中性。0050 約年化 20.28% | `etf.goal_down_payment` 六都各一列 |
+| 📊 **儀表板** | 可改 ETF、年數、每月投入 | Redash「六都頭期款」 |
+| ⏱️ **排程** | 兩個 Celery worker 分上市、上櫃 | 週一到週五 15:00 |
 
-## 執行方式
+`crawlers/finmind` 是另一套日線爬蟲，報酬計算不讀它，讀 `etf.etf_price`。
 
-先裝好 Docker Desktop、Python 3.11 和 [uv](https://docs.astral.sh/uv/)。**3306**、**8080**、**5000** 要是空的。不要另外啟動 `crawlers/housing` 或 `crawlers/finmind` 裡的 `mysql.yml`，那兩個檔也會佔用 3306。
+## Quick Start
 
-下面指令在專案根目錄執行。第 3 步要先進入 `crawlers/stock`。
+VM 已經起來。看資料或圖不用在自己電腦重抓。
 
-### 1. 下載專案
+| 服務 | 網址 |
+| --- | --- |
+| Redash | http://34.81.69.39:5000 |
+| phpMyAdmin | http://34.81.69.39:8080 |
+| RabbitMQ | http://34.81.69.39:15672 |
+| Flower | http://34.81.69.39:5555 |
+| Portainer | http://34.81.69.39:9000 |
 
-Clone 只會拿到程式。股價、ETF 清單和 Redash 圖表都在各自的資料庫裡，不會跟著 Git 下來。
+## Installation
+
+本機要自己跑時，先裝 Docker Desktop、Python 3.11 和 [uv](https://docs.astral.sh/uv/)。不要另外啟動 `crawlers/housing` 或 `crawlers/finmind` 裡的 `mysql.yml`，那些檔也佔 3306。
+
+<details>
+<summary>Linux / macOS</summary>
 
 ```bash
 git clone https://github.com/tibameDataEngineer1150701/etf-goal-calculator.git
 cd etf-goal-calculator
-```
-
-### 2. 先啟動 MySQL 和 phpMyAdmin
-
-這一步只開資料庫和看資料的網頁，先不抓股價。第一次啟動會執行 `crawlers/etf/schema.sql`，建好 `etf` 的表、空的 `stock.etf_list`，以及 `housing.city_house_price` 的 2026Q3 六都總價。
-
-空的清單去抓價不會寫進任何一檔。所以等清單寫入之後，再做第 4 步。
-
-```bash
 docker compose -f docker/docker-compose.yml up -d --build mysql phpmyadmin
-```
-
-瀏覽器開 http://localhost:8080 。組員直接連線用 `etfgoal` / `etfgoal`，這個帳號可以讀寫 `etf`、`stock`、`housing`。本機管理仍可用 `root` / `rootpass`。看得到這三個資料庫就代表這一步完成。
-
-用資料庫工具連時，主機是這台 MySQL 的位址、埠 `3306`、帳號 `etfgoal`、密碼 `etfgoal`。現在資料庫在你自己的電腦上，組員的電腦連不到 `localhost`。VM 的外部 IP 確定之後，把主機改成那個 IP。
-
-### 3. 把 ETF 清單寫進 MySQL
-
-抓價程式讀的是 `stock.etf_list` 的 `stock_id` 和 `market`。這支程式在 `crawlers/stock`，會向 FinMind 要清單、篩掉主動式和槓桿反向，再寫進 MySQL。它預設連 3307，所以要用環境變數改到本機這套 MySQL。
-
-```bash
-cd crawlers/stock
-uv sync
+cd crawlers/stock && uv sync
 export MYSQL_HOST=127.0.0.1 MYSQL_PORT=3306 MYSQL_USER=root MYSQL_DATABASE=stock
 uv run python -m crawler.save_etf_list
+cd ../..
+docker compose -f docker/docker-compose.yml run --rm crawler
 ```
 
-畫面上問密碼時輸入 `rootpass`。完成後約 279 筆，`market` 為 `twse` 或 `tpex`。PowerShell 把 `export ...` 換成：
+</details>
+
+<details>
+<summary>Windows PowerShell</summary>
 
 ```powershell
+git clone https://github.com/tibameDataEngineer1150701/etf-goal-calculator.git
+cd etf-goal-calculator
+docker compose -f docker/docker-compose.yml up -d --build mysql phpmyadmin
+cd crawlers/stock
+uv sync
 $env:MYSQL_HOST = "127.0.0.1"
 $env:MYSQL_PORT = "3306"
 $env:MYSQL_USER = "root"
 $env:MYSQL_DATABASE = "stock"
-```
-
-### 4. 抓股價寫進 `etf.etf_price`
-
-回到專案根目錄。這一支會依清單逐檔問 Yahoo，上市用 `.TW`、上櫃用 `.TWO`，把還原收盤寫進 `etf.etf_price`。全清單會跑很久；想先確認流程，用下面註解那行只抓 15 檔。
-
-```bash
+uv run python -m crawler.save_etf_list
 cd ../..
 docker compose -f docker/docker-compose.yml run --rm crawler
-# docker compose -f docker/docker-compose.yml run --rm -e ETF_LIMIT=15 crawler
 ```
 
-Yahoo 查無報價的代號會略過，不中斷整批。跑完可在 phpMyAdmin 看 `etf.etf_price` 有沒有列。
+</details>
 
-### 5. 跑頭期款試算
+<details>
+<summary>VM 上更新抓價程式</summary>
 
-試算讀 `etf.etf_price` 算各檔年化報酬。六都頭期款先看 `housing.down_pmt_target` 的成屋買賣、中性；還沒上傳這張表時，改用 `housing.city_house_price` 的總價中位數乘 2 成。結果寫進 `etf.goal_down_payment`。`goal_calculator.py` 不在抓價 image 裡，所以用掛載把程式放進容器。
-
-`down_pmt_target` 還沒有列時，表上的中位數是 2026Q3。若 `crawlers/housing/crawler/extracted` 已有更新的一季成交檔，這次執行會重算總價中位數再寫回；沒有新檔就維持 2026Q3。第二個掛載就是把那個目錄給試算程式看。`housing_txn_qtr` 是每平方公尺單價，試算不拿它自己換算一戶總價；30 坪換算在組員的 `Build_Down_Payment_Target.py`。
-
-`MONTHLY_INVEST=20000` 表示另外試算「每月存 2 萬、10 年後夠不夠付頭期款」。只想看每月要存多少時，可以把這個環境變數拿掉。
-
-```bash
-docker compose -f docker/docker-compose.yml run --rm --no-deps -e MYSQL_PASSWORD=rootpass -e MONTHLY_INVEST=20000 -v "${PWD}/crawlers/etf/goal_calculator.py:/app/goal_calculator.py:ro" -v "${PWD}/crawlers/housing/crawler/extracted:/housing/crawler/extracted:ro" crawler uv run python goal_calculator.py
-```
-
-結果在 phpMyAdmin 的 `etf.etf_cagr` 和 `etf.goal_down_payment`。
-
-### 用 Celery 派送（講義流程）
-
-這條和上面第 4 步二選一。第 4 步是一支程式自己抓完；這裡改由 producer 把每一檔送進 RabbitMQ，worker 領走再寫 MySQL。上市進 `twse`，上櫃進 `tpex`。
-
-先確定 MySQL 已經在跑，再啟動佇列和兩個 worker。Flower 用來看工人有沒有在線。
-
-```bash
-docker compose -f docker/celery-compose.yml up -d --build
-```
-
-- RabbitMQ 管理畫面：http://localhost:15672 （`worker` / `worker`）
-- Flower：http://localhost:5555
-
-派送時用 `ETF_LIMIT` 限制檔數。下面只送清單裡的前 2 檔，確認流程即可。
-
-```bash
-docker compose -f docker/celery-compose.yml --profile dispatch run --rm -e ETF_LIMIT=2 producer
-```
-
-排程容器會在週一到週五 15:00 呼叫同一支 producer，而不是自己抓價。要讓它一直等著：
-
-```bash
-docker compose -f docker/celery-compose.yml --profile schedule up -d scheduler
-```
-
-VM 上 MySQL 和 RabbitMQ 已經在網路 `etf_etf`。不要在 VM 再跑上面的 compose。拉下程式後重建映像，再用另一個 stack 名稱掛上現有網路：
+VM 的 MySQL 與 RabbitMQ 已經在網路 `etf_etf`。不要在 VM 再跑本機的 `celery-compose.yml`。
 
 ```bash
 cd ~/etf-goal-calculator
@@ -220,32 +98,45 @@ sudo docker build -f docker/Dockerfile -t etf-crawler:latest .
 sudo docker stack deploy -c swarm.yml --resolve-image never etf-jobs
 ```
 
-`etf-jobs` 會啟動兩個 worker 和一支排程。Airflow 的 DAG 也改成對 `etf_etf` 建立 Swarm 服務；VM 還沒有安裝 Airflow，而且不要和這支排程同時在 15:00 各跑一次。
+</details>
 
-### 6. 開啟 Redash
+## Architecture
 
-圖表服務用自己的資料庫，和 ETF 的 MySQL 分開，所以要另外啟動。`create_db` 只在第一次建立 Redash 自己的表；之後只要 `up -d`。
-
-```bash
-docker compose -f docker/redash-compose.yml run --rm server create_db
-docker compose -f docker/redash-compose.yml up -d
+```mermaid
+flowchart TD
+  sched["etf-jobs scheduler<br/>週一到週五 15:00"] --> prod[Producer]
+  prod --> mq[RabbitMQ]
+  mq --> twse[Worker twse]
+  mq --> tpex[Worker tpex]
+  twse --> yahoo[Yahoo Finance]
+  tpex --> yahoo
+  yahoo --> price[(etf.etf_price)]
+  housing[(housing.down_pmt_target)] --> goal[goal_calculator]
+  price --> goal
+  goal --> out[(etf_cagr / goal_down_payment)]
+  out --> redash["Redash 六都頭期款"]
 ```
 
-瀏覽器開 http://localhost:5000 ，第一次自己建立管理員帳號。
+`dags/etf_etl_dag.py` 會直接跑抓價，不經過 RabbitMQ。Airflow 沒有裝在這台機器上，避免和上面的排程各抓一次。
 
-接著把 ETF 的 MySQL 接進來：Settings → Data Sources → New Data Source → MySQL。Host 填 `host.docker.internal`，因為 Redash 在容器裡，`localhost` 指的是它自己，不是你電腦上的 MySQL。
+## 資料與查詢
 
-| 欄位 | 值 |
-| --- | --- |
-| Host | `host.docker.internal` |
-| Port | `3306` |
-| User | `root` |
-| Password | `rootpass` |
-| Database | `etf` |
+數字是 2026-11-03 在 VM 上的結果。
 
-Create → Query，資料來源選剛建的 MySQL。這支查詢用畫面上的參數重算每月需投入，不用改程式：`etf`（下拉，預設 `0050`）、`years`（年數，預設 `10`）、`monthly_invest`（每月投入，預設 `20000`）。`down_payment`（頭期款成數，預設 `0.2`）只在 `down_pmt_target` 還沒有成屋、中性資料時，才拿來乘總價中位數。ETF 下拉的選項要先另存一支查詢 `SELECT stock_id FROM etf_cagr ORDER BY stock_id`，而且要先執行過一次，下拉才有資料。
+| 資料表 | 內容 | 筆數 |
+| --- | --- | --- |
+| `stock.etf_list` | 被動式 ETF 清單 | 約 279 |
+| `etf.etf_price` | `date`、`stock_id`、`adj_close` | 約 392,253 |
+| `etf.etf_cagr` | 各檔含息年化報酬 | 有抓到報價的代號 |
+| `etf.goal_down_payment` | 六都頭期款與每月需投入 | 6 |
+| `housing.down_pmt_target` | 成屋、預售屋與三種情境。試算用成屋買賣、中性 | 36 |
+| `housing.housing_txn_qtr` | 六都單價（元／平方公尺）與成交筆數 | 516 |
+| `housing.housing_price_index` | 官方房價指數 | 385 |
+| `housing.cpi` | 季度 CPI，2016Q1 起 | 43 |
+| `housing.hpi` | 實質房價指數。CSV 檔名是 `real_hpi.csv` | 287 |
+| `housing.city_house_price` | 2026Q3 總價中位數。有成屋、中性時試算不用這張表 | 6 |
 
-有 `housing.down_pmt_target` 的成屋買賣、中性時，頭期款用組員算出的金額，不再用總價中位數重算。沒有這張表時才回到 `city_house_price`。
+建表在 [`crawlers/etf/schema.sql`](crawlers/etf/schema.sql)。儀表板用的查詢：
 
 ```sql
 SELECT
@@ -279,85 +170,34 @@ FROM (
   FROM housing.down_pmt_target
   WHERE transaction_type = '成屋買賣'
     AND scenario = '中性'
-  UNION ALL
-  SELECT
-    city,
-    median_total_wan,
-    ROUND(median_total_wan * 10000 * {{down_payment}})
-  FROM housing.city_house_price
-  WHERE NOT EXISTS (
-    SELECT 1 FROM housing.down_pmt_target
-    WHERE transaction_type = '成屋買賣' AND scenario = '中性'
-  )
 ) p
 JOIN etf_cagr c ON c.stock_id = '{{etf}}'
 ORDER BY p.house_price_wan DESC
 ```
 
-存檔後先在 ETF 欄選到一檔，再按 **Apply Changes**。空白送出會因為沒有 ETF 參數而失敗。Table 是數字，長條圖用「每月需投入」。
-
-做成儀表板：Create → Dashboard，取名後存檔。右上 Refresh 旁的箭頭 → Add Widget，選這支查詢和圖或表。參數類型要選 Dashboard，四個條件才會出現在儀表板上方。改完按 Apply Changes。Publish 之後，其他登入帳號才看得到。
-
-## MySQL 資料與驗證
-
-| 資料表 | 內容 | 寫入程式 |
-| --- | --- | --- |
-| `stock.etf_list` | 被動式 ETF 清單 | `crawlers/stock` |
-| `etf.etf_price` | `date`、`stock_id`、`adj_close` | `etf_to_mysql.py` |
-| `etf.etf_cagr` | 各檔含息年化報酬 | `goal_calculator.py` |
-| `etf.goal_down_payment` | 六都頭期款與每月需投入 | `goal_calculator.py` |
-| `housing.down_pmt_target` | 六都目前房價與 10 年後頭期款。試算用成屋買賣、中性 | `crawlers/housing` 的 `Build_Down_Payment_Target.py` 產出 CSV 後，由 `upload_data_to_mysql.py` 寫入 |
-| `housing.city_house_price` | 六都總價中位數（萬元）。目前種子是 2026Q3。`down_pmt_target` 有資料時試算不使用這張表 | 試算時若 `crawlers/housing/crawler/extracted` 有更新的一季，會重算並覆蓋 |
-| `housing.housing_txn_qtr` | 六都單價與成交筆數 | `crawlers/housing` |
-| `housing.housing_price_index`、`housing.cpi`、`housing.real_hpi` | 房價指數、CPI、實質房價指數 | `crawlers/housing` |
-
-股價以 `stock_id` + `date` 更新同一筆。`housing_txn_qtr` 是元／平方公尺，試算不拿它當一戶總價。
+ETF 下拉要先存並執行 `SELECT stock_id FROM etf_cagr ORDER BY stock_id`。長條圖 X 軸 `city`、Y 軸 `monthly_needed`。加到儀表板時，參數來源選 Dashboard，再 Publish。
 
 房價管線：
 
-- `crawlers/housing/crawler/WebCrawler_cpi.py`：主計總處對還沒發布的月份會給 0。當月、未來月份，以及緊鄰的前一個月若是非正數，就視為尚未發布並排除。再更早的月份若出現非正數，仍然中止。2026 年 11 月初實際排除的是 `2026-M10` 和 `2026-M11`，季度 CPI 從 2016Q1 起共 43 季。
-- `crawlers/housing/Real_HPI.py` 已併入組員 `real-estate-hpi-cpi-pipeline` 的 `c10e92a`。各地區官方 HPI 會先換成 2016 年四季平均為 100，再除以同樣基期的 CPI。交易資料以季度、縣市、交易類型當唯一鍵，成屋和預售屋可以同時留著。印出 CPI 平均值的那一行在 Python 3.11 會語法錯誤，已改成先算出平均值再印出，數字相同。檔案末尾多出來的一次執行已拿掉，腳本只跑一輪。
+- `WebCrawler_cpi.py`：當月、未來月份，以及緊鄰的前一個月若是非正數，視為尚未發布並排除。2026 年 11 月初排除 `2026-M10` 和 `2026-M11`。
+- `Real_HPI.py` 已併入組員 `real-estate-hpi-cpi-pipeline` 的 `c10e92a`。各地區官方 HPI 先換成 2016 年四季平均為 100，再除以同樣基期的 CPI。成屋和預售屋以交易類型分開。Python 3.11 印出 CPI 平均值的那一行已改成先算再印。
 
-```sql
-SELECT stock_id, COUNT(*) AS row_count,
-       MIN(`date`) AS first_date, MAX(`date`) AS last_date
-FROM etf.etf_price
-GROUP BY stock_id
-ORDER BY stock_id;
-```
+本機環境變數見 `crawlers/etf/goal_calculator.py` 開頭。常用的有 `MYSQL_HOST`、`PRIMARY_ETF`（預設 `0050`）、`INVEST_YEARS`（預設 `10`）、`MONTHLY_INVEST`。
 
-```sql
-SELECT city, house_price_wan, down_payment,
-       primary_etf, monthly_needed_primary, computed_at
-FROM etf.goal_down_payment
-ORDER BY house_price_wan DESC;
-```
+## 專案問題
 
-```sql
-SELECT city, median_total_wan, period
-FROM housing.city_house_price
-ORDER BY median_total_wan DESC;
-```
+## 常見問題
 
-## 開發進度與限制
+## Contributors
 
-| 項目 | 狀態 |
-| --- | --- |
-| `stock.etf_list` 與 Yahoo 抓價入庫 | 本機已寫入 MySQL |
-| 六都總價與頭期款試算 | 已寫入 `goal_down_payment` |
-| Redash 單一 ETF、頭期款、年數、每月投入 | 本機可操作 |
-| Producer、Celery、RabbitMQ | 本機用 celery-compose。VM 用 `swarm.yml` 接上 `etf_etf` |
-| Airflow DAG | 對 `etf-crawler:latest` 建立 Swarm 服務。VM 尚未安裝 Airflow |
-| 多檔權重組合 | 待討論 |
+- [mark900403](https://github.com/mark900403)
+- [athlan0726](https://github.com/athlan0726)
+- [wayne_hung](https://github.com/wayne_hung)
+- [rchingyun](https://github.com/rchingyun)
+- [yuyumomo](https://github.com/yuyumomo)
 
-Yahoo 查無報價的代號會略過，不中斷整批。`city_house_price` 連不上 MySQL 時，試算才改用手填粗估，畫面上會註明。
+<a href="https://github.com/tibameDataEngineer1150701/etf-goal-calculator/graphs/contributors">
+  <img src="https://contrib.rocks/image?repo=tibameDataEngineer1150701/etf-goal-calculator" alt="Contributors">
+</a>
 
-## 參考資料
-
-- `crawlers/finmind/README.md`：FinMind 日線管線自己的架構與課程操作。
-- [FinMind API](https://finmindtrade.com/)
-- [Celery Documentation](https://docs.celeryq.dev/)
-- [RabbitMQ Documentation](https://www.rabbitmq.com/docs)
-- [uv Documentation](https://docs.astral.sh/uv/)
-
-本專案用於資料工程學習與資料流程驗證，不構成投資建議。
+這是課程專案，沒有贊助方案。結果只供資料流程驗證，不構成投資建議。
