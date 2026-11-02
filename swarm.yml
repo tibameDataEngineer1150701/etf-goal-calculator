@@ -1,11 +1,11 @@
 # VM 上的 ETF 排程。MySQL、RabbitMQ 已經在 stack「etf」、網路 etf_etf。
 # 不要用 stack 名稱 etf 部署這個檔，否則會把資料庫服務換掉。
 #
-# 在 VM 上，先拉程式再重建本機映像（映像不在 Docker Hub）：
+# 在 VM 上，先拉程式再從 Docker Hub 拉 image：
 #   cd ~/etf-goal-calculator
 #   git pull
-#   sudo docker build -f docker/Dockerfile -t etf-crawler:latest .
-#   sudo docker stack deploy -c swarm.yml --resolve-image never etf-jobs
+#   sudo docker pull mark0403/etf-crawler:0.0.1
+#   sudo docker stack deploy -c swarm.yml etf-jobs
 #
 # 週一到週五 15:00，scheduler 把 stock.etf_list 送到 twse / tpex。
 # worker 從既有的 rabbitmq 領任務，寫進既有的 mysql。
@@ -14,7 +14,7 @@ version: "3.8"
 
 services:
   worker_twse:
-    image: etf-crawler:latest
+    image: mark0403/etf-crawler:0.0.1
     command: ["uv", "run", "celery", "-A", "etf_tasks", "worker", "--loglevel=info", "-Q", "twse", "--hostname=twse@%h"]
     environment:
       MYSQL_HOST: mysql
@@ -39,7 +39,7 @@ services:
           - node.role == manager
 
   worker_tpex:
-    image: etf-crawler:latest
+    image: mark0403/etf-crawler:0.0.1
     command: ["uv", "run", "celery", "-A", "etf_tasks", "worker", "--loglevel=info", "-Q", "tpex", "--hostname=tpex@%h"]
     environment:
       MYSQL_HOST: mysql
@@ -64,7 +64,7 @@ services:
           - node.role == manager
 
   scheduler:
-    image: etf-crawler:latest
+    image: mark0403/etf-crawler:0.0.1
     command: ["uv", "run", "python", "etf_scheduler.py"]
     environment:
       MYSQL_HOST: mysql

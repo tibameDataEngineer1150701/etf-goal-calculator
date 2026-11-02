@@ -19,7 +19,7 @@ GCP 機器 `etf-manager`（`asia-east1-b`，`e2-medium`，`34.81.69.39`）已在
 
 Airflow 沒有安裝。這台是 `e2-medium`，記憶體約 4 GB，已經在跑 MySQL、RabbitMQ、兩個 worker、Flower、Portainer 和 Redash。Airflow 自己的網頁、排程和資料庫就要大約 4 GB，再加上去會把機器撐滿。而且 `etf-jobs` 已經在 15:00 抓同一份清單，DAG 再跑一次只會覆寫同一筆股價。
 
-Image 在 VM 上建置，沒有推上 Docker Hub。抓價和房價都只在這一台機器跑，`docker stack deploy --resolve-image never` 用的是本機 image，不需要從 Docker Hub 拉。Docker Hub 帳號也還沒建好。
+已建立 Docker Hub。Image 是 `mark0403/etf-crawler:0.0.1`，VM 部署時從 Docker Hub 拉下來用。
 
 ## 功能
 
@@ -94,8 +94,8 @@ VM 的 MySQL 與 RabbitMQ 已經在網路 `etf_etf`。不要在 VM 再跑本機�
 ```bash
 cd ~/etf-goal-calculator
 git pull
-sudo docker build -f docker/Dockerfile -t etf-crawler:latest .
-sudo docker stack deploy -c swarm.yml --resolve-image never etf-jobs
+sudo docker pull mark0403/etf-crawler:0.0.1
+sudo docker stack deploy -c swarm.yml etf-jobs
 ```
 
 </details>

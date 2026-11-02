@@ -1,6 +1,6 @@
 # 一鍵起「MySQL + phpMyAdmin + 抓價入庫程式」
 # 在專案根目錄執行：
-#   docker compose -f docker/docker-compose.yml up --build
+#   docker compose -f docker/docker-compose.yml up
 #   docker compose -f docker/docker-compose.yml down    # 加 -v 連資料一起刪
 #
 # 看資料：瀏覽器開 http://localhost:8080（帳號 root / 密碼 rootpass）
@@ -27,11 +27,7 @@ services:
       retries: 20
 
   crawler:
-    build:
-      context: ..
-      dockerfile: docker/Dockerfile
-    # 若要改用 Docker Hub 上已 push 的 image，改成下面這行（並註解掉 build）：
-    # image: your-dockerhub-account/etf-crawler:0.0.1
+    image: mark0403/etf-crawler:0.0.1
     depends_on:
       mysql:
         condition: service_healthy

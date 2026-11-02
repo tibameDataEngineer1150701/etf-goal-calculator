@@ -19,7 +19,7 @@ The GCP VM `etf-manager` (`asia-east1-b`, `e2-medium`, `34.81.69.39`) is running
 
 Airflow is not installed. This machine is an `e2-medium` with about 4 GB of memory, and it already runs MySQL, RabbitMQ, two workers, Flower, Portainer, and Redash. Airflow's web server, scheduler, and database need about 4 GB by themselves. Adding them would fill the machine. `etf-jobs` already crawls the same list at 15:00, so the DAG would only overwrite the same price rows.
 
-Images are built on the VM and are not pushed to Docker Hub. The price and housing jobs run only on this machine. `docker stack deploy --resolve-image never` uses the local image and does not pull from Docker Hub. A Docker Hub account is not set up yet.
+Docker Hub is set up. The image is `mark0403/etf-crawler:0.0.1`, and the VM pulls it from Docker Hub when it deploys.
 
 ## Features
 
@@ -94,8 +94,8 @@ MySQL and RabbitMQ on the VM are already on the `etf_etf` network. Do not start 
 ```bash
 cd ~/etf-goal-calculator
 git pull
-sudo docker build -f docker/Dockerfile -t etf-crawler:latest .
-sudo docker stack deploy -c swarm.yml --resolve-image never etf-jobs
+sudo docker pull mark0403/etf-crawler:0.0.1
+sudo docker stack deploy -c swarm.yml etf-jobs
 ```
 
 </details>

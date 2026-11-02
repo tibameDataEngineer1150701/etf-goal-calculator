@@ -1,6 +1,6 @@
 # Airflow DAG：交易日 15:00 更新 ETF 還原收盤。
 # VM 的 overlay etf_etf 不允許 docker run 直接加入，所以建立 Swarm service。
-# 映像檔是 VM 上 build 的 etf-crawler:latest，不從 Docker Hub 拉。
+# image 從 Docker Hub 拉：mark0403/etf-crawler:0.0.1。
 # 若 swarm.yml 的 scheduler 已經在跑，不要再啟用這支 DAG，避免同一時間抓兩次。
 
 from datetime import datetime, timedelta
@@ -9,7 +9,7 @@ from airflow import DAG
 from airflow.providers.docker.operators.docker_swarm import DockerSwarmOperator
 
 default_args = {
-    "owner": "etf-goal",
+    "owner": "mark0403",
     "retries": 1,
     "retry_delay": timedelta(minutes=5),
 }
@@ -26,10 +26,10 @@ with DAG(
 
     run_etf_crawler = DockerSwarmOperator(
         task_id="run_etf_crawler",
-        image="etf-crawler:latest",
+        image="mark0403/etf-crawler:0.0.1",
         api_version="auto",
         auto_remove="success",
-        force_pull=False,
+        force_pull=True,
         command="uv run python etf_to_mysql.py",
         tty=True,
         enable_logging=True,

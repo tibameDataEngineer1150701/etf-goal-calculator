@@ -46,8 +46,8 @@
 ## 8. Docker image
 
 - [x] 基本版之外，已有 `docker/with.env.Dockerfile`、`docker/prod.with.env.Dockerfile`。build 時用 `local.ini.example` 產生 `.env`，正式密碼要自己改。
-- [ ] image 名稱改成自己的 Docker Hub 帳號。現在仍是 `your-dockerhub-account/etf-crawler:0.0.1`。
-- [ ] `docker push`。DAG 與 `swarm.yml` 的 image、owner 改成同一個帳號。
+- [x] image 名稱是 `mark0403/etf-crawler:0.0.1`。
+- [x] `docker push`。DAG 與 `swarm.yml` 的 image、owner 都是 `mark0403`。
 
 ## 9. Swarm
 

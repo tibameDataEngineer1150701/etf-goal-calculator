@@ -1,7 +1,7 @@
 # 本機用。RabbitMQ、Flower、上市／上櫃 worker。MySQL 用 docker/docker-compose.yml 先啟動。
 # 在專案根目錄：
 #   docker compose -f docker/docker-compose.yml up -d mysql
-#   docker compose -f docker/celery-compose.yml up -d --build
+#   docker compose -f docker/celery-compose.yml up -d
 #   docker compose -f docker/celery-compose.yml --profile dispatch run --rm -e ETF_LIMIT=2 producer
 # 排程（週一到週五 15:00 派送）：
 #   docker compose -f docker/celery-compose.yml --profile schedule up -d scheduler
@@ -36,9 +36,7 @@ services:
         condition: service_healthy
 
   worker_twse:
-    build:
-      context: ..
-      dockerfile: docker/Dockerfile
+    image: mark0403/etf-crawler:0.0.1
     command: uv run celery -A etf_tasks worker --loglevel=info -Q twse --hostname=twse@%h
     environment: &worker_env
       MYSQL_HOST: mysql
@@ -55,9 +53,7 @@ services:
         condition: service_healthy
 
   worker_tpex:
-    build:
-      context: ..
-      dockerfile: docker/Dockerfile
+    image: mark0403/etf-crawler:0.0.1
     command: uv run celery -A etf_tasks worker --loglevel=info -Q tpex --hostname=tpex@%h
     environment: *worker_env
     depends_on:
@@ -66,9 +62,7 @@ services:
 
   producer:
     profiles: ["dispatch"]
-    build:
-      context: ..
-      dockerfile: docker/Dockerfile
+    image: mark0403/etf-crawler:0.0.1
     command: uv run python etf_producer.py
     depends_on:
       rabbitmq:
@@ -79,9 +73,7 @@ services:
 
   scheduler:
     profiles: ["schedule"]
-    build:
-      context: ..
-      dockerfile: docker/Dockerfile
+    image: mark0403/etf-crawler:0.0.1
     command: uv run python etf_scheduler.py
     environment: *worker_env
     depends_on:
