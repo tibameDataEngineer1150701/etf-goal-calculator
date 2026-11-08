@@ -21,12 +21,14 @@ rabbitmq_user = worker
 rabbitmq_password = worker
 
 [PRODUCTION]
-mysql_host = mysql
+# Composer 在 GKE 上，連不到 Swarm 裡的主機名稱 mysql、rabbitmq。
+# 這裡用 etf-goal 專案 VM etf-manager 的內部 IP。正式密碼用 Composer 的環境變數覆蓋，不要寫進這個檔。
+mysql_host = 10.140.0.2
 mysql_port = 3306
 mysql_user = root
 mysql_password = change-me
 mysql_db = etf
-rabbitmq_host = rabbitmq
+rabbitmq_host = 10.140.0.2
 rabbitmq_port = 5672
 rabbitmq_user = worker
 rabbitmq_password = worker

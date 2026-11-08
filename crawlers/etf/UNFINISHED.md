@@ -59,8 +59,8 @@
 ## 10. Airflow
 
 - [x] `dags/etf_etl_dag.py` 已有，週一到週五 15:00。
-- [ ] DAG 改成送進 producer，而不是直接跑抓價 image。
-- [ ] 設定 Airflow Variable `mysql_password`。
+- [x] DAG 改成 KubernetesPodOperator，只跑 `etf_producer.py`，任務送到 VM 的 RabbitMQ。
+- [ ] 在 Composer 設定 Airflow Variable `mysql_password`、`rabbitmq_password`。
 - [ ] 在 Airflow 裡定時觸發成功一次。
 - [ ] README 補上 Airflow、Celery 的操作說明。
 
