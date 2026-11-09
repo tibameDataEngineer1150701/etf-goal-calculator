@@ -15,22 +15,24 @@
   Live dashboard: <a href="http://34.81.69.39:5000">Six-city down payment</a> (after login, open it under Dashboards)
 </p>
 
-The GCP VM `etf-manager` (`asia-east1-b`, `e2-medium`, `34.81.69.39`) is running. Prices, housing data, and the goal calculation are in MySQL. A Swarm schedule crawls prices at 15:00 on weekdays, Taipei time.
+The GCP VM `etf-manager` (`asia-east1-b`, `e2-medium`, external IP `34.81.69.39`, internal IP `10.140.0.2`) is running. Prices, housing data, and the goal calculation are in MySQL.
 
-Airflow is not installed. This machine is an `e2-medium` with about 4 GB of memory, and it already runs MySQL, RabbitMQ, two workers, Flower, Portainer, and Redash. Airflow's web server, scheduler, and database need about 4 GB by themselves. Adding them would fill the machine. `etf-jobs` already crawls the same list at 15:00, so the DAG would only overwrite the same price rows.
+Weekday 15:00 Taipei time is scheduled by the shared Composer environment `composer` in project `etf-goal` (`us-east4`, Airflow 2.11.1). DAG `etf_price_etl` uses `KubernetesPodOperator` to run `etf_producer.py` and send `stock.etf_list` to RabbitMQ on the VM. The TWSE and TPEx workers stay on the VM and take the tasks. `etf-jobs` scheduler is scaled to 0 so it does not send the list again. The 2026-11-09 15:00 run succeeded, and the workers wrote `etf.crawl_one` results into MySQL. `etf.etf_price` has 393,883 rows through 2026-11-09. That day has prices for 236 symbols, against 279 on 11/6, because some Yahoo requests failed. MySQL `3306` and RabbitMQ `5672` accept traffic only from the Composer pod range `10.28.0.0/17`.
 
-Docker Hub is set up. The image is `mark0403/etf-crawler:0.0.1`, and the VM pulls it from Docker Hub when it deploys.
+Airflow is not installed on the VM. This machine is an `e2-medium` with about 4 GB of memory, and it already runs MySQL, RabbitMQ, two workers, Flower, Portainer, and Redash. Airflow's web server, scheduler, and database need about 4 GB by themselves. Composer is the shared Airflow in the same GCP project.
+
+The Docker Hub account is `mark0403`. VM workers use `mark0403/etf-crawler:0.0.1`. The Composer producer uses `mark0403/etf-crawler:0.0.2.composer`, built from `docker/prod.with.env.Dockerfile`. Passwords live in the Composer Airflow Variables `mysql_password` and `rabbitmq_password`, not in Git.
 
 ## Features
 
 | | | |
 | --- | --- | --- |
-| 📈 **Prices** | Yahoo adjusted close `adj_close`. Listed `.TW`, OTC `.TWO` | `etf.etf_price`, about 392,253 rows |
-| 📋 **Universe** | FinMind list with active, leveraged, and inverse ETFs removed | `stock.etf_list` |
+| 📈 **Prices** | Yahoo adjusted close `adj_close`. Listed `.TW`, OTC `.TWO` | `etf.etf_price`, 393,883 rows, latest 2026-11-09 |
+| 📋 **Universe** | FinMind list with active, leveraged, and inverse ETFs removed | `stock.etf_list`, 333 symbols |
 | 🏠 **Housing** | Price of a 30-ping home, then a 10-year down payment from the house-price index | `housing.down_pmt_target`, 36 rows |
 | 🧮 **Goal** | Existing-home sales, neutral case. 0050 is about 20.28% a year | `etf.goal_down_payment`, one row per city |
 | 📊 **Dashboard** | Change the ETF, years, and monthly amount | Redash dashboard |
-| ⏱️ **Schedule** | Two Celery workers, one for TWSE and one for TPEx | Weekdays at 15:00 |
+| ⏱️ **Schedule** | Composer sends tasks. Two Celery workers on the VM, one for TWSE and one for TPEx | Weekdays at 15:00 |
 
 `crawlers/finmind` is a separate daily-price crawler. Return calculations read `etf.etf_price`, not that pipeline.
 
@@ -45,6 +47,7 @@ The VM is already up. You do not need to crawl again on your own computer.
 | RabbitMQ | http://34.81.69.39:15672 |
 | Flower | http://34.81.69.39:5555 |
 | Portainer | http://34.81.69.39:9000 |
+| Airflow | [Composer `composer`](https://9ac02a6cb8fc427eb49d61045f3e7fc2-dot-us-east4.composer.googleusercontent.com) |
 
 ## Installation
 
@@ -96,7 +99,10 @@ cd ~/etf-goal-calculator
 git pull
 sudo docker pull mark0403/etf-crawler:0.0.1
 sudo docker stack deploy -c swarm.yml etf-jobs
+sudo docker service scale etf-jobs_scheduler=0
 ```
+
+The scheduler in `swarm.yml` defaults to 1 replica. Scale it to 0 after deploy so only Composer sends the 15:00 tasks. Leave both workers at 1.
 
 </details>
 
@@ -104,8 +110,8 @@ sudo docker stack deploy -c swarm.yml etf-jobs
 
 ```mermaid
 flowchart TD
-  sched["etf-jobs scheduler<br/>weekdays 15:00 Taipei"] --> prod[Producer]
-  prod --> mq[RabbitMQ]
+  dag["Composer etf_price_etl<br/>weekdays 15:00 Taipei"] --> prod[etf_producer.py]
+  prod --> mq[RabbitMQ on the VM]
   mq --> twse[Worker twse]
   mq --> tpex[Worker tpex]
   twse --> yahoo[Yahoo Finance]
@@ -117,7 +123,7 @@ flowchart TD
   out --> redash[Redash dashboard]
 ```
 
-`dags/etf_etl_dag.py` runs the price crawl directly and does not go through RabbitMQ. Airflow is not installed on this machine, so the two schedules do not both crawl at 15:00.
+`dags/etf_etl_dag.py` only dispatches work. The VM workers crawl prices. For a local exercise, start MySQL, then `docker/celery-compose.yml`, and dispatch with `--profile dispatch`.
 
 ## Data and queries
 
@@ -184,7 +190,11 @@ Housing pipeline:
 - `WebCrawler_cpi.py` treats a non-positive value in the current month, a future month, or the immediately previous month as not yet published and drops it. In early November 2026 that removes `2026-M10` and `2026-M11`.
 - `Real_HPI.py` includes teammate commit `c10e92a` from `real-estate-hpi-cpi-pipeline`. Each region's official HPI is rebased so the 2016 quarterly average is 100, then divided by CPI on the same base. Existing homes and presale homes stay separate by transaction type. The CPI average print was rewritten so it runs on Python 3.11.
 
-Local environment variables are listed at the top of `crawlers/etf/goal_calculator.py`. Common ones are `MYSQL_HOST`, `PRIMARY_ETF` (default `0050`), `INVEST_YEARS` (default `10`), and `MONTHLY_INVEST`.
+Local environment variables are listed at the top of `crawlers/etf/goal_calculator.py`. Common ones are `MYSQL_HOST`, `PRIMARY_ETF` (default `0050`), `INVEST_YEARS` (default `10`), and `MONTHLY_INVEST`. Production hosts are in the `PRODUCTION` section of `crawlers/etf/local.ini.example`. Do not commit real passwords.
+
+## Still open
+
+- The architecture drawing lives in this README as Mermaid. A separate image file has not been uploaded.
 
 ## Project issues
 

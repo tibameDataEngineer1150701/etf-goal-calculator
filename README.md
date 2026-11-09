@@ -15,22 +15,24 @@
   線上儀表板：<a href="http://34.81.69.39:5000">六都頭期款</a>（登入後在 Dashboards 打開）
 </p>
 
-GCP 機器 `etf-manager`（`asia-east1-b`，`e2-medium`，`34.81.69.39`）已在跑。股價、房價與試算都在 MySQL。週一到週五 15:00（台北時間）由 Swarm 排程抓價。
+GCP 機器 `etf-manager`（`asia-east1-b`，`e2-medium`，外部 IP `34.81.69.39`，內部 IP `10.140.0.2`）已在跑。股價、房價與試算都在 MySQL。
 
-Airflow 沒有安裝。這台是 `e2-medium`，記憶體約 4 GB，已經在跑 MySQL、RabbitMQ、兩個 worker、Flower、Portainer 和 Redash。Airflow 自己的網頁、排程和資料庫就要大約 4 GB，再加上去會把機器撐滿。而且 `etf-jobs` 已經在 15:00 抓同一份清單，DAG 再跑一次只會覆寫同一筆股價。
+週一到週五 15:00（台北時間）由專案 `etf-goal` 裡共用的 Composer 環境 `composer`（`us-east4`，Airflow 2.11.1）排程。DAG `etf_price_etl` 用 `KubernetesPodOperator` 跑 `etf_producer.py`，把 `stock.etf_list` 送到 VM 上的 RabbitMQ。上市、上櫃兩個 worker 留在 VM 領任務。`etf-jobs` 的 scheduler 已縮成 0，避免同一時間再送一次。2026-11-09 15:00 的排程已成功，worker 收到 `etf.crawl_one` 並寫進 MySQL。`etf.etf_price` 最新日期是 2026-11-09，共 393,883 筆；當天 236 檔有價格，11/6 是 279 檔，部分 Yahoo 請求失敗。MySQL `3306` 與 RabbitMQ `5672` 只對 Composer Pod 網段 `10.28.0.0/17` 開放。
 
-已建立 Docker Hub。Image 是 `mark0403/etf-crawler:0.0.1`，VM 部署時從 Docker Hub 拉下來用。
+VM 沒有自架 Airflow。這台是 `e2-medium`，記憶體約 4 GB，已經在跑 MySQL、RabbitMQ、兩個 worker、Flower、Portainer 和 Redash。Airflow 自己的網頁、排程和資料庫就要大約 4 GB。Composer 建在同一個 GCP 專案，全組共用這一個環境。
+
+Docker Hub 帳號是 `mark0403`。VM 的 worker 用 `mark0403/etf-crawler:0.0.1`。Composer 的 producer 用 `mark0403/etf-crawler:0.0.2.composer`，由 `docker/prod.with.env.Dockerfile` 建置。連線密碼放在 Composer 的 Airflow Variables `mysql_password`、`rabbitmq_password`，不寫進 Git。
 
 ## 功能
 
 | | | |
 | --- | --- | --- |
-| 📈 **股價** | Yahoo 還原收盤 `adj_close`，上市 `.TW`、上櫃 `.TWO` | `etf.etf_price` 約 392,253 筆 |
-| 📋 **清單** | FinMind 篩掉主動式與槓桿反向 | `stock.etf_list` |
+| 📈 **股價** | Yahoo 還原收盤 `adj_close`，上市 `.TW`、上櫃 `.TWO` | `etf.etf_price` 393,883 筆，最新 2026-11-09 |
+| 📋 **清單** | FinMind 篩掉主動式與槓桿反向 | `stock.etf_list` 333 檔 |
 | 🏠 **房價** | 30 坪總價，再依房價指數估 10 年後頭期款 | `housing.down_pmt_target` 36 列 |
 | 🧮 **試算** | 成屋買賣、中性。0050 約年化 20.28% | `etf.goal_down_payment` 六都各一列 |
 | 📊 **儀表板** | 可改 ETF、年數、每月投入 | Redash「六都頭期款」 |
-| ⏱️ **排程** | 兩個 Celery worker 分上市、上櫃 | 週一到週五 15:00 |
+| ⏱️ **排程** | Composer 送任務，VM 上兩個 Celery worker 分上市、上櫃 | 週一到週五 15:00 |
 
 `crawlers/finmind` 是另一套日線爬蟲，報酬計算不讀它，讀 `etf.etf_price`。
 
@@ -45,6 +47,7 @@ VM 已經起來。看資料或圖不用在自己電腦重抓。
 | RabbitMQ | http://34.81.69.39:15672 |
 | Flower | http://34.81.69.39:5555 |
 | Portainer | http://34.81.69.39:9000 |
+| Airflow | [Composer `composer`](https://9ac02a6cb8fc427eb49d61045f3e7fc2-dot-us-east4.composer.googleusercontent.com) |
 
 ## Installation
 
@@ -96,7 +99,10 @@ cd ~/etf-goal-calculator
 git pull
 sudo docker pull mark0403/etf-crawler:0.0.1
 sudo docker stack deploy -c swarm.yml etf-jobs
+sudo docker service scale etf-jobs_scheduler=0
 ```
+
+`swarm.yml` 裡的 scheduler 預設是 1 個複本。部署後要縮成 0，15:00 才只由 Composer 送任務。兩個 worker 維持 1。
 
 </details>
 
@@ -104,8 +110,8 @@ sudo docker stack deploy -c swarm.yml etf-jobs
 
 ```mermaid
 flowchart TD
-  sched["etf-jobs scheduler<br/>週一到週五 15:00"] --> prod[Producer]
-  prod --> mq[RabbitMQ]
+  dag["Composer etf_price_etl<br/>週一到週五 15:00"] --> prod[etf_producer.py]
+  prod --> mq[RabbitMQ on VM]
   mq --> twse[Worker twse]
   mq --> tpex[Worker tpex]
   twse --> yahoo[Yahoo Finance]
@@ -117,7 +123,7 @@ flowchart TD
   out --> redash["Redash 六都頭期款"]
 ```
 
-`dags/etf_etl_dag.py` 會直接跑抓價，不經過 RabbitMQ。Airflow 沒有裝在這台機器上，避免和上面的排程各抓一次。
+`dags/etf_etl_dag.py` 只負責派送。抓價在 VM 的 worker。本機練習仍可用 `docker/celery-compose.yml`：先起 MySQL，再起 compose，用 `--profile dispatch` 派送。
 
 ## 資料與查詢
 
@@ -182,7 +188,11 @@ ETF 下拉要先存並執行 `SELECT stock_id FROM etf_cagr ORDER BY stock_id`�
 - `WebCrawler_cpi.py`：當月、未來月份，以及緊鄰的前一個月若是非正數，視為尚未發布並排除。2026 年 11 月初排除 `2026-M10` 和 `2026-M11`。
 - `Real_HPI.py` 已併入組員 `real-estate-hpi-cpi-pipeline` 的 `c10e92a`。各地區官方 HPI 先換成 2016 年四季平均為 100，再除以同樣基期的 CPI。成屋和預售屋以交易類型分開。Python 3.11 印出 CPI 平均值的那一行已改成先算再印。
 
-本機環境變數見 `crawlers/etf/goal_calculator.py` 開頭。常用的有 `MYSQL_HOST`、`PRIMARY_ETF`（預設 `0050`）、`INVEST_YEARS`（預設 `10`）、`MONTHLY_INVEST`。
+本機環境變數見 `crawlers/etf/goal_calculator.py` 開頭。常用的有 `MYSQL_HOST`、`PRIMARY_ETF`（預設 `0050`）、`INVEST_YEARS`（預設 `10`）、`MONTHLY_INVEST`。正式環境的主機在 `crawlers/etf/local.ini.example` 的 `PRODUCTION`，範本密碼不要提交。
+
+## 尚未完成
+
+- 架構圖目前只在這份 README 的 Mermaid，還沒有另外上傳圖檔。
 
 ## 專案問題
 
