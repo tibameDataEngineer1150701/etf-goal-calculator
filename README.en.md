@@ -200,6 +200,34 @@ Local environment variables are listed at the top of `crawlers/etf/goal_calculat
 
 ## FAQ
 
+1. HPI Base Period
+
+- The HPI base period used in this project differs from the base period (2013 annual average = 100) adopted in the National Policy Foundation's report, Comparison and Applications of Taiwan's Housing Price Indices.
+
+  - The data period is set to 2016–2026 (10 years).
+
+  - The program assumes 2016 = 100 as the HPI base period.
+
+  - The analysis focuses on relative price trends rather than interpreting the percentage increase above the base period as an absolute measure.
+
+2. Floor Area Measurement
+
+- Transaction prices per ping (坪) in Taiwan's Real Estate Transaction Price Registration System are calculated based on the transferred floor area, including shared facilities.
+
+- This project assumes that the floor area refers to the registered building area (權狀坪數) to maintain a consistent measurement basis and avoid overestimating or underestimating property values due to differences in floor area definitions.
+
+3. HPI Geographic Coverage
+
+- The HPI data is available only at the city/county level. If a user selects a district, the corresponding city/county-level HPI growth rate will be applied.
+
+- The project assumes a property purchase in one of Taiwan's six special municipalities within the next 10 years (by 2036). Therefore, the analysis focuses primarily on city/county-level data.
+
+4. Historical Market Conditions
+
+- The 2016–2026 period represents a decade-long bull market in Taiwan's real estate sector. Using this period to project the next decade may therefore produce distorted or unreliable estimates.
+
+- This project does not constitute investment advice. Its scope is limited to demonstrating programming logic, data flows, data engineering practices, and technical implementation.
+
 ## Contributors
 
 - [mark900403](https://github.com/mark900403)
