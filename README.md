@@ -190,10 +190,6 @@ ETF 下拉要先存並執行 `SELECT stock_id FROM etf_cagr ORDER BY stock_id`�
 
 本機環境變數見 `crawlers/etf/goal_calculator.py` 開頭。常用的有 `MYSQL_HOST`、`PRIMARY_ETF`（預設 `0050`）、`INVEST_YEARS`（預設 `10`）、`MONTHLY_INVEST`。正式環境的主機在 `crawlers/etf/local.ini.example` 的 `PRODUCTION`，範本密碼不要提交。
 
-## 尚未完成
-
-- 架構圖目前只在這份 README 的 Mermaid，還沒有另外上傳圖檔。
-
 ## 專案問題
 
 1. Data Ingestion（資料擷取）
