@@ -1,0 +1,6 @@
+# Reuse the inspected v3 runtime only after requirements.lock equality is verified.
+# No dependency downloads or changes to the original image/container.
+ARG BASE_IMAGE=etf-web-api:3.0.0-20261105
+FROM ${BASE_IMAGE}
+COPY --chown=10001:10001 api/main.py api/catalog.py api/snapshot.py /app/
+CMD ["uvicorn", "main:create_app", "--factory", "--host", "0.0.0.0", "--port", "8000", "--workers", "1", "--limit-concurrency", "16", "--backlog", "32", "--no-access-log"]

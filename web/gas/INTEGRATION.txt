@@ -1,0 +1,156 @@
+GAS 動態 ETF 儀表板 v4：團隊共編與接手說明
+日期：2026-11-12
+程式版本：gas-live-v4.0-candidate-2026-11-12
+狀態：完整連線測試版；使用者本日回報「儀錶板測試目前沒有問題」，授權 PUSH 到 GitHub。
+功能測試接受，不等於資料來源逐筆驗證、資安稽核或正式產品全面驗收。
+
+一、這次上傳什麼、不動什麼
+
+依使用者本日確認「可以直接覆蓋掉舊版」，本資料夾直接取代 web/gas/ 的 JDBC 舊測試版。
+同時整合先前 /v1/snapshot、固定三檔的 HTTPS 原型，升級為資料庫動態清單版本。
+包含 GAS 三個來源檔、唯讀 Python API、測試、鎖定依賴、部署參考與資料對帳說明。
+Code.gs、Index.html、appsscript.json 必須配套使用，並對接本資料夾的 /v2 API。
+爬蟲、Airflow DAG、資料庫與主 README 不變；新版只維護 web/gas/，不另留重複的 web/gas-api/ 來源。
+JDBC 舊版可從 main 基準提交 504dee4 的 web/gas/ 取得；HTTPS 三檔原型可從提交 050c7aa 的 web/gas-api/ 取得。
+這是 Git 版本回復依據，不是請團隊混用兩版檔案，也不會刪除既有線上部署。
+
+GitHub 上傳與 GAS／VM 部署是不同動作。本次沒有重部署、改 Token、改資料庫或啟用排程。
+未新增自動部署工作流程；Repo 外的 webhook／Cloud Build 整合仍須由管理者確認。
+本次沿用 PR #11，等待團隊審閱；不直接合併到 main。
+
+二、現在的資料流
+
+使用者瀏覽器
+  → GAS 伺服器：listChoices / getEtfSnapshot / calculate
+  → 有效 HTTPS 憑證與 Bearer Token 保護的 API
+  → MySQL 唯讀帳號
+
+GAS 與網頁在 Google Apps Script 執行，不是在 VM 上執行。
+VM 提供 API 與 HTTPS 代理；本版本沿用團隊既有 MySQL 與爬蟲成果。
+前端不直接連 MySQL，也拿不到 API Token 或資料庫密碼。
+
+GET /v2/etfs：以 stock.etf_list 為候選清單，附上可用狀態、停用原因和分頁版本。
+GET /v2/snapshot?symbol=...：重新檢查該檔資格，取得自己的價格期間與房市資料。
+價格讀 etf.etf_price.adj_close；不是沿用舊 etf_cagr 表。
+房市讀 housing.down_pmt_target、housing.housing_txn_qtr、housing.housing_price_index。
+房市期間由 down_pmt_target 的「中性」資料列錨定，不等於每次都選原始表最新一季。
+
+當日查核：333 檔候選、253 檔可用、80 檔停用。這是當時結果，不是寫死清單。
+「資料庫候選」不等於「臺灣全部現行 ETF」。ETF 清單爬蟲已在 crawlers/stock/，本次不重複搬入。
+
+三、操作與計算重點
+
+1. 開啟測試網址，選城市、交易類型、ETF、報酬模式、年限、月投入與頭期款比例。
+2. 自訂報酬預設 0%；只有選擇歷史模式，才使用所選 ETF 的價格端點計算 CAGR。
+3. 歷史 CAGR＝(期末 adj_close／期初 adj_close)^(365／相隔日數)－1。
+4. 有效月報酬＝(1＋有效年報酬)^(1/12)－1；初始資產 0，每月底投入，固定 30 坪。
+5. 房價與投資使用同一年限；頭期款＝基準房價 × (1＋房價年成長率)^年限 × 頭期款比例。
+6. 資產與目標先四捨五入顯示，顯示差額用兩者相減；達標判定仍用未取整金額。
+7. 所需每月投入向上取整。變更條件、切換 ETF 或讀取失敗時，不把舊結果當成新結果。
+8. 資料來源、期間、限制與計算假設保留在結果下方，可展開查看。
+
+完整白話範例與團隊待確認事項見：
+資料基準與計算方式_團隊對帳白話版_2026-11-12.txt
+
+四、資料可用性與 API 契約
+
+候選門檻：至少 365 天、240 筆有效價格；價格距今不超過 14 天、清單批次不超過 35 天。
+價格／清單天數可用 MAX_PRICE_AGE_DAYS、MAX_LIST_AGE_DAYS 設定。
+另要求該檔 last_seen_at 等於清單最新批次；依賴目前完整批次 upsert 的寫法。
+若爬蟲改成逐檔或分市場分批更新，必須重新確認這個判斷。
+這些是團隊測試門檻，仍須與排程、休市與產品需求正式對齊。
+
+/v2/etfs 回傳 mode=LIVE、catalog.schemaVersion=2、catalogId、queriedAt、total、
+eligibleCount、policy、items、offset、nextOffset。
+每頁最多 100 筆；後續頁帶 catalog_id，版本不同回 409。清單上限 2,000，超限停止，不靜默截斷。
+/v2/snapshot 回傳 mode=LIVE、snapshot.schemaVersion=2、mysql2- 開頭內容識別碼、
+單檔 ETF 與 eligibility，以及六都房市資料；完整欄位以 API 與 Code.gs 驗證規則為準。
+
+400 代號格式錯誤；401 未授權；404 查無標的；409 分頁版本改變；422 標的不可用；
+429 超過共用速率上限；503 來源失敗。失敗不回退範例資料。
+此 API 不提供 /v1/snapshot，不可直接拿來覆蓋舊版仍在使用的服務。
+
+API 快取 60 秒；GAS 快取 300 秒，另拒絕超過 7 分鐘的讀取時間。
+queriedAt 是 API 讀取時間，不是爬蟲最後成功時間，也不是即時行情保證。
+API 共用每分鐘 120 個已授權請求上限，不是每個 Google 使用者各有 120 次。
+/health/live 只代表程序存活，不代表資料庫或所有資料正常。
+
+五、設定與權限
+
+GAS「專案設定 → 指令碼屬性」：
+  API_BASE_URL：由管理者提供的 HTTPS 來源，不加 /v2 路徑。
+  API_TOKEN：透過安全管道取得，至少 32 字元；不得貼進 HTML、GitHub 或 PR。
+
+API 必填環境變數：
+  API_TOKEN_FILE：掛載的 API Token 檔案路徑。
+  MYSQL_PASSWORD_FILE：掛載的資料庫密碼檔案路徑。
+選填 MYSQL_HOST、MYSQL_USER；預設 mysql、etf_web_readonly。
+非 root 不等於唯讀；管理者須確認帳號只有上述五個表所需 SELECT 權限。
+程式使用參數化查詢、唯讀一致快照交易、查詢逾時，結束 rollback 與 close。
+帳密與 Token 保存在秘密檔案／GAS 屬性中；本 Repo 不含實際值。
+
+實際測試網址要求 Google 登入，持有網址的其他 Google 使用者也可進入；不是團隊白名單。
+GAS 三個檔案只要求 script.external_request；實際部署身分、版本與存取對象另在 GAS 設定。
+本次保留原 GAS 固定第 4 版；新測試網址使用固定第 5 版，同專案編輯器 HEAD 是 v4 程式。
+不要誤將舊部署指向新版本；部署號碼與程式的 v4 名稱不是同一種版本編號。
+測試網址由管理者在團隊內分享，本 Repo 不放操作憑證或帶入私人部署記錄。
+
+六、檔案與本機重跑
+
+Code.gs / Index.html / appsscript.json：GAS 三個正式入口。
+api/：Python API、Dockerfile、requirements.in 與附雜湊的鎖檔。
+tests/：API、GAS 模擬與瀏覽器測試；fixtures/ 中 v3-Code.gs 只做回歸，不可部署。
+deploy/：現有團隊 VM 的設定參考，不是可隨意重跑的全自動部署工具。
+verify.ps1：不安裝、不部署、不連正式資料庫的本機驗證。
+VERIFICATION.txt：驗證方式、結果與限制。
+verification/：重跑時產生的本機輸出，預設不進版本庫。
+
+在本資料夾建立測試環境（需自行允許套件下載；建議 Python 3.12、Node 20 以上）：
+  python -m venv .venv
+  .\.venv\Scripts\python.exe -X utf8 -m pip install --require-hashes -r api/dev-requirements.lock
+  npm ci --ignore-scripts --no-audit --no-fund
+
+已備妥依賴與 Google Chrome：
+  .\verify.ps1 -PythonExecutable .\.venv\Scripts\python.exe
+
+也可分別執行：
+  python -X utf8 tests/build-fixtures.py
+  python -X utf8 -m pytest tests/test_api.py -q -p no:cacheprovider
+  npm run test:gas
+  npm run test:browser
+
+瀏覽器測試預設使用已安裝的 Chrome，不自動下載；可用 TEST_BROWSER_PATH 指定執行檔。
+GAS/瀏覽器測試使用固定日期、測試基準與合成資料，攔阻外部 HTTP(S)，不接正式 API。
+不要把 tests/fixtures/v3-contract.json 當成當日行情；它只用來保留舊版計算結果。
+不包含依賴本機相鄰 v3 目錄的 verify-preservation；舊內容保存在 Git 歷史，這次替換範圍由 PR 差異核對。
+
+七、VM 部署參考與回復界線
+
+api/Dockerfile 可在全新環境用鎖檔建置：
+  docker build -t etf-web-api:4.0-test-20261112 api
+這是可重建配方，不代表與當日已運行映像具有相同 digest，也不是本次已重新建置的證據。
+
+deploy/Dockerfile.team-test 是當日沿用既有 v3 runtime 的配方：
+  只有確認舊 image 存在、依賴鎖檔一致、UID 與 /app 結構相容後才能使用。
+  該配方包含 Uvicorn 並行上限 16／backlog 32；一般 api/Dockerfile 不保證相同運行限制。
+deploy/stack.team-test.yml 沿用既有外部 network／secret 與 VM placement，不能直接套到空白 GCP 專案。
+若以 etf-web-v4 為 stack 名稱，服務名會是 etf-web-v4_api_v4。
+deploy/Caddyfile.team-test 指定新舊完整服務名稱，避免共同 api 別名造成錯誤轉送：
+  /v2/etfs、/v2/snapshot、/health/v4 → 新服務。
+  /v1/snapshot、/health/live → 原服務。
+API_IP、有效 IP 憑證與續期、Caddy 掛載和外部網路須由管理者配套處理；不會由此檔自動建立。
+
+正式套用前先確認現有 service/config、記錄備份與映像 digest，再安排部署及回復驗證。
+新版與舊版共享 VM／代理／Token，不是完全獨立的安全環境。
+不要重跑舊 stack 檔覆蓋現行代理，否則可能撤掉新版 /v2 路由。
+只回復 GAS 原始碼不足以回復服務：須同步確認固定部署版本、API 契約與代理設定。
+本次上傳不執行上述部署或回復；沒有新增付費資源，也沒有改爬蟲排程。
+
+八、仍須由團隊確認
+
+- 可用門檻與清單批次規則，是否配合實際 ETL 排程。
+- adjusted close 的配息、分割與幣別；停牌、缺漏與新上市資料如何呈現。
+- 房市是否篩住宅、車位是否拆價、面積與單價單位及不同資料期間能否搭配。
+- 稅費、交易成本、貸款條件、通膨與市場波動目前未納入。
+- 正式存取政策、憑證續期、告警、成本與負載容量；不同 Google 帳號測試。
+歷史 CAGR 不保證未來報酬；目前是團隊情境試算，不是投資建議或達標機率。

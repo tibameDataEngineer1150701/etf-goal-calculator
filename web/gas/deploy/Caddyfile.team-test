@@ -1,0 +1,38 @@
+{
+    auto_https off
+    default_sni {$API_IP}
+    admin localhost:2019
+}
+
+http://{$API_IP} {
+    handle /.well-known/acme-challenge/* {
+        root * /var/www/acme
+        file_server
+    }
+    handle {
+        respond "HTTPS required" 403
+    }
+}
+
+https://{$API_IP} {
+    tls /etc/letsencrypt/live/{$API_IP}/fullchain.pem /etc/letsencrypt/live/{$API_IP}/privkey.pem
+    @v4 path /v2/etfs /v2/snapshot
+    handle @v4 {
+        reverse_proxy etf-web-v4_api_v4:8000
+    }
+    handle /health/v4 {
+        rewrite * /health/live
+        reverse_proxy etf-web-v4_api_v4:8000
+    }
+    @allowed path /health/live /v1/snapshot
+    handle @allowed {
+        reverse_proxy etf-web_api:8000
+    }
+    handle {
+        respond "Not found" 404
+    }
+    header {
+        -Server
+        X-Content-Type-Options nosniff
+    }
+}

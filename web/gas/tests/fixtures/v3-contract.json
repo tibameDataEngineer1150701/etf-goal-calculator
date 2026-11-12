@@ -1,0 +1,106 @@
+{
+  "mode": "LIVE",
+  "snapshot": {
+    "schemaVersion": 1,
+    "capturedDate": "2026-11-04",
+    "housePeriod": "2026Q3",
+    "hpiPeriod": "2026Q1",
+    "hpi5Period": "2021Q1",
+    "hpi10Period": "2016Q1",
+    "priceStart": "2014-11-05",
+    "priceEnd": "2026-11-03",
+    "etfs": [
+      {
+        "symbol": "0050",
+        "name": "元大台灣50",
+        "first": 11.4663,
+        "last": 100.6,
+        "observations": 2919,
+        "priceStart": "2014-11-05",
+        "priceEnd": "2026-11-03"
+      },
+      {
+        "symbol": "0056",
+        "name": "元大高股息",
+        "first": 10.2746,
+        "last": 53.55,
+        "observations": 2923,
+        "priceStart": "2014-11-05",
+        "priceEnd": "2026-11-03"
+      },
+      {
+        "symbol": "006208",
+        "name": "富邦台50",
+        "first": 25.6969,
+        "last": 230.55,
+        "observations": 2919,
+        "priceStart": "2014-11-05",
+        "priceEnd": "2026-11-03"
+      }
+    ],
+    "houses": [
+      {
+        "city": "臺北市",
+        "hpi": 125.88,
+        "hpi5": 105.55,
+        "hpi10": 100.08,
+        "existing": 234420.5,
+        "existingCount": 618,
+        "presale": 369412.0,
+        "presaleCount": 430
+      },
+      {
+        "city": "新北市",
+        "hpi": 139.79,
+        "hpi5": 108.03,
+        "hpi10": 100.68,
+        "existing": 128357.0,
+        "existingCount": 1282,
+        "presale": 232862.0,
+        "presaleCount": 1090
+      },
+      {
+        "city": "桃園市",
+        "hpi": 154.61,
+        "hpi5": 111.42,
+        "hpi10": 103.69,
+        "existing": 82927.0,
+        "existingCount": 821,
+        "presale": 134268.5,
+        "presaleCount": 1200
+      },
+      {
+        "city": "臺中市",
+        "hpi": 148.7,
+        "hpi5": 115.13,
+        "hpi10": 98.38,
+        "existing": 82461.5,
+        "existingCount": 1014,
+        "presale": 165500.0,
+        "presaleCount": 635
+      },
+      {
+        "city": "臺南市",
+        "hpi": 150.07,
+        "hpi5": 119.73,
+        "hpi10": 98.53,
+        "existing": 72895.0,
+        "existingCount": 743,
+        "presale": 133906.0,
+        "presaleCount": 341
+      },
+      {
+        "city": "高雄市",
+        "hpi": 143.18,
+        "hpi5": 110.6,
+        "hpi10": 97.78,
+        "existing": 72378.0,
+        "existingCount": 1128,
+        "presale": 117696.0,
+        "presaleCount": 425
+      }
+    ],
+    "id": "mysql-cf2681d789a7a99de758c7eb",
+    "queriedAt": "2026-11-04T12:00:00+08:00"
+  }
+}

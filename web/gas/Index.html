@@ -1,106 +1,475 @@
-<!DOCTYPE html>
-<html>
+<!doctype html>
+<!-- v4 團隊連線測試；須搭配 gas-live-v4/gas/Code.gs 與 API v2 契約。 -->
+<html lang="zh-Hant">
 <head>
+  <base target="_top">
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ETF 購屋試算｜動態資料 v4</title>
   <style>
-    body { font-family: "Segoe UI", "Noto Sans TC", sans-serif; margin: 0; background: #f4f1ea; color: #1c1915; }
-    main { max-width: 720px; margin: 32px auto; padding: 0 16px 48px; }
-    h1 { font-size: 28px; margin-bottom: 4px; }
-    p.lead { color: #5c564c; margin-top: 0; }
-    form, .result { background: #fff; border: 1px solid #e4ddd0; border-radius: 12px; padding: 20px; }
-    label { display: block; font-size: 14px; margin: 12px 0 4px; }
-    select, input { width: 100%; box-sizing: border-box; padding: 10px 12px; border: 1px solid #d9d0c3; border-radius: 8px; font-size: 16px; }
-    button { margin-top: 16px; background: #1f4d3a; color: #fff; border: 0; border-radius: 8px; padding: 12px 18px; font-size: 16px; cursor: pointer; }
-    button:disabled { opacity: 0.6; }
-    .result { margin-top: 16px; }
-    .error { color: #8d2b2b; }
-    table { width: 100%; border-collapse: collapse; }
-    td { padding: 8px 0; border-bottom: 1px solid #eee; }
-    td:last-child { text-align: right; font-variant-numeric: tabular-nums; }
+    :root { color-scheme: light; --ink:#18332f; --muted:#52635f; --green:#176248; --line:#d8e2dd; --paper:#f5f7f4; --amber:#934a13; }
+    * { box-sizing:border-box; }
+    body { margin:0; color:var(--ink); background:var(--paper); font:16px/1.65 "Segoe UI","Microsoft JhengHei",sans-serif; }
+    [hidden] { display:none !important; }
+    .demo-banner { padding:10px 20px; background:#fff0d1; color:#663b08; text-align:center; font-size:14px; }
+    .shell { max-width:1180px; margin:auto; padding:28px 24px 48px; }
+    header { margin-bottom:26px; }
+    h1 { font-size:clamp(26px,4vw,36px); line-height:1.3; margin:0 0 10px; letter-spacing:-.03em; }
+    h2 { margin:0 0 14px; font-size:20px; }
+    h3 { margin:0 0 8px; font-size:17px; }
+    p { margin:0 0 12px; }
+    .muted,.help { color:var(--muted); }
+    .help { font-size:13px; margin:5px 0 0; }
+    .workspace { display:grid; grid-template-columns:320px minmax(0,1fr); gap:24px; align-items:start; }
+    .panel { background:#fff; border:1px solid var(--line); border-radius:12px; padding:22px; }
+    fieldset { border:0; padding:0; margin:0; min-width:0; }
+    legend { font-size:20px; font-weight:700; margin-bottom:14px; }
+    .field { margin-bottom:15px; }
+    label { display:block; font-size:14px; font-weight:600; margin-bottom:5px; }
+    input,select,button { font:inherit; }
+    input,select { display:block; width:100%; min-height:46px; border:1px solid #b4c5bd; border-radius:7px; padding:9px 10px; color:var(--ink); background:#fff; }
+    input:focus-visible,select:focus-visible,button:focus-visible,summary:focus-visible { outline:3px solid #6aa990; outline-offset:3px; }
+    .buttons { display:flex; gap:10px; margin-top:18px; flex-wrap:wrap; }
+    button { min-height:44px; border:1px solid var(--green); border-radius:7px; padding:9px 15px; cursor:pointer; background:var(--green); color:#fff; font-weight:600; }
+    button.secondary { background:#fff; color:var(--green); }
+    button:disabled { opacity:.55; cursor:wait; }
+    .fixed-note { background:#eef4f0; padding:10px 12px; border-radius:7px; font-size:14px; }
+    .status { margin-bottom:16px; padding:12px 14px; border-left:4px solid #4f826c; background:#eaf2ed; }
+    .error { background:#fff0ee; border-left:4px solid #a53b30; color:#7a2821; padding:12px 14px; margin-bottom:16px; overflow-wrap:anywhere; }
+    .empty { padding:44px 24px; text-align:left; }
+    .empty p { max-width:48ch; }
+    .panel.outcome { --outcome-color:#176448; --outcome-background:#e7f4eb; padding:0; overflow:hidden; margin-bottom:20px; }
+    .outcome[data-achieved="false"] { --outcome-color:#954215; --outcome-background:#fff0df; }
+    .outcome-banner { border-top:6px solid var(--outcome-color); background:var(--outcome-background); padding:22px 24px; display:flex; align-items:center; gap:16px; }
+    .outcome-icon { color:var(--outcome-color); width:48px; height:48px; flex-shrink:0; }
+    .outcome-kicker { color:var(--outcome-color); font-size:13px; font-weight:600; margin:0 0 3px; }
+    .outcome h2 { color:var(--outcome-color); font-size:clamp(26px,4vw,32px); line-height:1.3; margin:0; }
+    .outcome-description { font-size:14px; margin:7px 0 0; }
+    .outcome-body { padding:22px 24px; }
+    .selection-summary { font-size:13px; color:var(--muted); margin:0 0 20px; }
+    .difference { margin:0; }
+    .difference dt { color:var(--outcome-color); font-weight:600; font-size:15px; }
+    .difference dd { margin:4px 0 0; color:var(--outcome-color); font-size:clamp(30px,4.5vw,44px); font-weight:750; line-height:1.3; font-variant-numeric:tabular-nums; overflow-wrap:anywhere; }
+    .metrics { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:16px 24px; margin:22px 0 0; padding:18px 0; border-top:1px solid var(--line); border-bottom:1px solid var(--line); }
+    .metric dt { font-size:14px; color:var(--muted); }
+    .metric dd { margin:3px 0 0; font-size:clamp(21px,3vw,27px); line-height:1.4; font-weight:700; font-variant-numeric:tabular-nums; overflow-wrap:anywhere; }
+    .metric small { font-size:13px; font-weight:400; color:var(--muted); }
+    .readiness { margin-top:18px; }
+    .readiness-heading { display:flex; align-items:baseline; justify-content:space-between; flex-wrap:wrap; gap:8px; margin-bottom:8px; }
+    .readiness-heading span { font-size:14px; }
+    .readiness-heading strong { font-size:20px; font-variant-numeric:tabular-nums; }
+    .readiness-track { height:10px; background:#e3eae5; border-radius:10px; overflow:hidden; }
+    .readiness-fill { height:100%; width:0; background:var(--outcome-color); border-radius:10px; }
+    .monthly-summary { margin-top:22px; padding:16px 18px; border-radius:10px; background:#eef4f0; }
+    .monthly-summary dl { display:flex; align-items:baseline; justify-content:space-between; flex-wrap:wrap; gap:8px 14px; margin:0; }
+    .monthly-summary dt { font-size:14px; }
+    .monthly-summary dd { margin:0; font-size:25px; font-weight:700; font-variant-numeric:tabular-nums; }
+    .stale-note { display:none; margin:10px 0 0; font-size:14px; font-weight:700; }
+    #results[data-stale="true"] .stale-note { display:block; }
+    .result-note { margin:16px 0 0; font-size:13px; color:var(--muted); }
+    .facts { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:10px 24px; padding:16px 0 4px; }
+    .facts dt { font-size:13px; color:var(--muted); }
+    .facts dd { margin:0; font-weight:600; font-variant-numeric:tabular-nums; }
+    .chart-panel { margin-bottom:20px; }
+    .legend { display:flex; gap:15px; flex-wrap:wrap; font-size:13px; margin-bottom:10px; }
+    .legend span { display:inline-flex; align-items:center; gap:6px; }
+    .swatch { width:24px; border-top:3px solid; display:inline-block; }
+    .swatch.assets { border-color:#176248; }
+    .swatch.target { border-color:#a15120; border-top-style:dashed; }
+    .swatch.principal { border-color:#697985; border-top-style:dotted; }
+    #chart svg { width:100%; height:auto; display:block; }
+    .table-wrap { overflow-x:auto; }
+    table { width:100%; border-collapse:collapse; font-size:14px; margin-top:12px; }
+    th,td { text-align:right; padding:9px 8px; border-bottom:1px solid var(--line); font-variant-numeric:tabular-nums; white-space:nowrap; }
+    th:first-child,td:first-child { text-align:left; }
+    caption { text-align:left; color:var(--muted); padding-bottom:6px; }
+    details { margin-top:14px; }
+    summary { cursor:pointer; font-weight:600; padding:5px 0; }
+    .source-details { margin:0 0 20px; padding:14px 20px; }
+    .source-details > summary { min-height:24px; }
+    ul { padding-left:22px; }
+    li { margin-bottom:7px; }
+    .metadata { font-size:12px; overflow-wrap:anywhere; color:var(--muted); margin-top:18px; }
+    #results[data-stale="true"] { opacity:.6; }
+    @media (max-width:760px) {
+      .shell { padding:22px 16px 36px; }
+      .workspace { grid-template-columns:1fr; gap:18px; }
+      .panel { padding:18px; }
+      .outcome-banner,.outcome-body { padding:18px; }
+      .outcome-banner { gap:12px; }
+      .outcome-icon { width:40px; height:40px; }
+    }
+    @media (max-width:380px) { .metrics,.facts { grid-template-columns:1fr; } }
+    @media (prefers-reduced-motion:no-preference) { button { transition:background-color .15s; } }
   </style>
 </head>
 <body>
-  <main>
-    <h1>ETF 頭期款試算</h1>
-    <p class="lead">選擇城市和 ETF，看每月要存多少，10 年後才付得起頭期款。</p>
-    <form id="form">
-      <label for="city">城市</label>
-      <select id="city" required></select>
-      <label for="etf">ETF</label>
-      <select id="etf" required></select>
-      <label for="years">投資年數</label>
-      <input id="years" type="number" min="1" max="40" value="10">
-      <label for="monthly">每月投入（元，0 表示只算需要存多少）</label>
-      <input id="monthly" type="number" min="0" step="1000" value="20000">
-      <button id="submit" type="submit">試算</button>
-    </form>
-    <section id="result" class="result" hidden></section>
+  <div class="demo-banner" id="dataBanner"><strong>雲端資料試算</strong>｜正在連接資料服務；住宅與車位口徑待確認，結果僅供課堂情境展示。</div>
+  <main class="shell">
+    <header>
+      <h1>每月投入，離購屋頭期款還差多少？</h1>
+      <p class="muted">選擇六都、房地交易類型與 ETF，依相同年限重新計算資產與頭期款。</p>
+      <p class="help">教育用途情境試算，不構成投資建議；歷史績效與示範報酬均不保證未來成果。</p>
+    </header>
+    <div class="workspace">
+      <aside class="panel">
+        <form id="form">
+          <fieldset id="fields" disabled>
+            <legend>設定試算條件</legend>
+            <div class="field"><label for="city">購屋城市</label><select id="city" required></select></div>
+            <div class="field"><label for="transactionType">交易類型</label><select id="transactionType" required></select></div>
+            <p class="fixed-note">固定 30 坪・初始資產 0 元</p>
+            <div class="field"><label for="etf">資料庫 ETF 選項</label><select id="etf" aria-describedby="etfHelp etfSource" required></select><p id="etfHelp" class="help">依資料庫清單與資料檢查結果提供選項；不是推薦排序。</p><p id="etfSource" class="help" role="status"></p><button id="reloadEtf" type="button" class="secondary">重新讀取所選 ETF</button><details><summary>查看不可用 ETF 與原因</summary><ul id="unavailableEtfs" class="help"></ul></details></div>
+            <div class="field"><label for="returnMode">投資報酬假設</label><select id="returnMode"><option value="custom">自訂有效年報酬率</option><option value="historical">沿用歷史 CAGR（非預測）</option></select></div>
+            <div class="field" id="returnField"><label for="annualReturnPercent">自訂有效年報酬率（%）</label><input id="annualReturnPercent" type="number" value="0" min="-90" max="100" step="any" required><p class="help">0% 僅為測試起點。可輸入負值測試虧損情境，不是推薦報酬。</p></div>
+            <div class="field"><label for="years">投資／購屋年限</label><input id="years" type="number" value="10" min="1" max="30" step="1" required aria-describedby="yearsHelp"><p id="yearsHelp" class="help">1～30 年；資產與房價目標使用相同年限。</p></div>
+            <div class="field"><label for="monthly">每月投入（新臺幣元）</label><input id="monthly" type="number" value="20000" min="0" max="1000000" step="1" required aria-describedby="monthlyHelp"><p id="monthlyHelp" class="help">可輸入 0，查看達成目標所需的每月投入。</p></div>
+            <div class="field"><label for="downPaymentPercent">頭期款比例（%）</label><input id="downPaymentPercent" type="number" value="20" min="10" max="80" step="1" required><p class="help">10%～80%，其餘貸款與貸款資格不在本次試算範圍。</p></div>
+            <div class="field"><label for="scenario">房價成長情境</label><select id="scenario" required></select></div>
+            <div class="field" id="growthField" hidden><label for="houseGrowthPercent">自訂房價年成長率（%）</label><input id="houseGrowthPercent" type="number" value="0" min="-50" max="50" step="any"><p class="help">允許負值；HPI 歷史情境會依城市自動計算，非全臺統一成長率。</p></div>
+            <div class="buttons"><button id="submit" type="submit">開始試算</button><button id="reset" type="button" class="secondary">恢復預設</button></div>
+          </fieldset>
+        </form>
+        <p class="metadata">資料載入時由伺服器讀取雲端 API，計算期間使用同一批資料。重新整理可更新資料，可能使用最長約 6 分鐘快取。</p>
+      </aside>
+      <section aria-label="試算結果">
+        <p id="status" class="status" role="status" aria-live="polite">正在讀取雲端資料與載入選項…</p>
+        <p id="error" class="error" role="alert" hidden></p>
+        <div id="empty" class="panel empty"><h2>先設定條件，再查看結果</h2><p class="muted">結果包含未來頭期款、預估資產、差額與每月所需投入。下方圖表會比較各年年末的資產與目標。</p></div>
+        <div id="results" hidden>
+          <section id="outcome" class="panel outcome" aria-labelledby="outcomeTitle">
+            <div class="outcome-banner">
+              <svg id="successIcon" class="outcome-icon" viewBox="0 0 48 48" aria-hidden="true" focusable="false" hidden><circle cx="24" cy="24" r="19" fill="none" stroke="currentColor" stroke-width="3"></circle><path d="M14 24l7 7 14-15" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"></path></svg>
+              <svg id="shortfallIcon" class="outcome-icon" viewBox="0 0 48 48" aria-hidden="true" focusable="false" hidden><path d="M24 5L45 41H3Z" fill="none" stroke="currentColor" stroke-width="3" stroke-linejoin="round"></path><path d="M24 18v10" stroke="currentColor" stroke-width="3" stroke-linecap="round"></path><circle cx="24" cy="35" r="1.8" fill="currentColor"></circle></svg>
+              <div><p id="outcomeContext" class="outcome-kicker"></p><h2 id="outcomeTitle"></h2><p id="outcomeDescription" class="outcome-description"></p><p class="stale-note">條件已變更・此為上次結果，請重新試算。</p></div>
+            </div>
+            <div class="outcome-body">
+            <p id="selectionSummary" class="selection-summary"></p>
+            <dl class="difference"><dt id="differenceLabel">預估還差</dt><dd id="differenceValue"></dd></dl>
+            <dl class="metrics">
+              <div class="metric"><dt>預估期末資產</dt><dd id="assetsValue"></dd></div>
+              <div class="metric"><dt>未來頭期款目標</dt><dd id="targetValue"></dd></div>
+            </dl>
+            <div class="readiness">
+              <div class="readiness-heading"><span id="readinessLabel">目標準備度（資產 ÷ 頭期款）</span><strong id="readinessValue"></strong></div>
+              <div id="readinessBar" class="readiness-track" role="progressbar" aria-labelledby="readinessLabel" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><div id="readinessFill" class="readiness-fill"></div></div>
+              <p class="help">代表資產與目標的金額比例，並非達標機率。</p>
+            </div>
+            <div class="monthly-summary"><dl><dt>達標所需每月總投入</dt><dd id="neededValue"></dd></dl><p id="additionalNeeded" class="help"></p></div>
+            <dl class="facts">
+              <div><dt>累計投入本金</dt><dd id="principalValue"></dd></div>
+              <div><dt>本次採用有效年報酬率</dt><dd id="returnValue"></dd></div>
+              <div><dt>單價換算 30 坪參考總價</dt><dd id="basePriceValue"></dd></div>
+              <div><dt>預估未來房屋總價</dt><dd id="futurePriceValue"></dd></div>
+            </dl>
+            <p class="result-note">依所選資料與假設試算，不代表未來報酬或貸款核准。</p>
+            </div>
+          </section>
+          <section class="panel chart-panel">
+            <h2>資產累積與頭期款目標</h2>
+            <div class="legend" aria-label="圖例"><span><i class="swatch assets" aria-hidden="true"></i>預估資產</span><span><i class="swatch target" aria-hidden="true"></i>頭期款目標</span><span><i class="swatch principal" aria-hidden="true"></i>累計本金</span></div>
+            <div id="chart"></div>
+            <p class="help">金額單位：萬元。各點為年末數值，未模擬市場波動；相同數據也列於年度明細。</p>
+            <details><summary>查看年度數據</summary><div class="table-wrap"><table><caption>新臺幣元；僅在顯示時四捨五入</caption><thead><tr><th scope="col">年末</th><th scope="col">累計本金</th><th scope="col">預估資產</th><th scope="col">頭期款目標</th></tr></thead><tbody id="yearRows"></tbody></table></div></details>
+          </section>
+          <details id="sourceDetails" class="panel source-details">
+            <summary>查看資料與試算說明</summary>
+            <h3>資料來源與限制</h3>
+            <p id="sourceSummary" class="help"></p><ul id="qualityWarnings" class="help"></ul>
+            <h3>資料與計算假設</h3>
+            <ul id="assumptions"></ul>
+            <p id="roundingNote" class="help"></p>
+            <p id="version" class="metadata"></p>
+          </details>
+        </div>
+      </section>
+    </div>
   </main>
   <script>
-    var form = document.getElementById("form");
-    var result = document.getElementById("result");
-    var submit = document.getElementById("submit");
+    'use strict';
+    var UI_VERSION = 'gas-ui-v4.0-candidate';
+    var EXPECTED_CALC_VERSION = 'gas-live-v4.0-candidate-2026-11-12';
+    var form = document.getElementById('form');
+    var fields = document.getElementById('fields');
+    var submit = document.getElementById('submit');
+    var results = document.getElementById('results');
+    var empty = document.getElementById('empty');
+    var statusBox = document.getElementById('status');
+    var errorBox = document.getElementById('error');
+    var choices = null;
+    var token = 0;
+    var selectionToken = 0;
+    var selectedData = null;
+    var moneyFormatter = new Intl.NumberFormat('zh-TW', { maximumFractionDigits: 0 });
 
-    function money(value) {
-      return Number(value).toLocaleString("zh-TW");
+    function text(id, value) { document.getElementById(id).textContent = value; }
+    function money(value) { return moneyFormatter.format(value) + ' 元'; }
+    function percent(value) { return new Intl.NumberFormat('zh-TW', { style:'percent', maximumFractionDigits:2 }).format(value); }
+    function setStatus(message) { statusBox.textContent = message; }
+    function showError(err) {
+      errorBox.hidden = false;
+      errorBox.textContent = err && err.message ? err.message : '發生錯誤，請重新整理頁面後再試。';
     }
-
-    google.script.run.withSuccessHandler(function (data) {
-      var city = document.getElementById("city");
-      var etf = document.getElementById("etf");
-      data.cities.forEach(function (name) {
-        var option = document.createElement("option");
-        option.value = name;
-        option.textContent = name;
-        city.appendChild(option);
+    function fillOptions(id, rows, valueKey, labelFn) {
+      var select = document.getElementById(id);
+      select.replaceChildren();
+      rows.forEach(function (row) {
+        var option = document.createElement('option');
+        option.value = valueKey ? row[valueKey] : row;
+        option.textContent = labelFn ? labelFn(row) : row;
+        if (row && row.eligible === false) option.disabled = true;
+        select.appendChild(option);
       });
-      data.etfs.forEach(function (row) {
-        var option = document.createElement("option");
-        option.value = row.stock_id;
-        option.textContent = row.stock_id + "（" + row.cagr_pct + "%）";
-        if (row.stock_id === "0050") option.selected = true;
-        etf.appendChild(option);
-      });
-    }).withFailureHandler(showError).listChoices();
-
-    form.addEventListener("submit", function (event) {
-      event.preventDefault();
+    }
+    function applyDefaults() {
+      Object.keys(choices.defaults).forEach(function (key) { document.getElementById(key).value = choices.defaults[key]; });
+      syncModes();
+    }
+    function syncModes() {
+      var customReturn = document.getElementById('returnMode').value === 'custom';
+      var customGrowth = document.getElementById('scenario').value === 'custom';
+      document.getElementById('returnField').hidden = !customReturn;
+      document.getElementById('annualReturnPercent').disabled = !customReturn;
+      document.getElementById('growthField').hidden = !customGrowth;
+      document.getElementById('houseGrowthPercent').disabled = !customGrowth;
+      document.getElementById('houseGrowthPercent').required = customGrowth;
+    }
+    function markDirty() {
+      if (!choices) return;
+      syncModes();
+      token += 1;
+      submit.disabled = !selectedReady();
+      submit.textContent = '開始試算';
+      errorBox.hidden = true;
+      if (!results.hidden) results.dataset.stale = 'true';
+      setStatus(selectedReady() ? '條件已變更，請按「開始試算」。先前結果尚未更新。' : '所選 ETF 尚未成功載入，請重新讀取或選擇其他 ETF。');
+    }
+    form.addEventListener('input', markDirty);
+    form.addEventListener('change', function(event) {
+      markDirty();
+      if(event.target.id === 'etf') loadSelected();
+    });
+    function selectedReady() {
+      return !!(selectedData && selectedData.symbol === document.getElementById('etf').value && choices.snapshotId === selectedData.snapshotId);
+    }
+    function loadSelected() {
+      var symbol = document.getElementById('etf').value;
+      var sequence = ++selectionToken;
+      token += 1;
+      selectedData = null;
+      choices.snapshotId = null;
       submit.disabled = true;
-      result.hidden = false;
-      result.innerHTML = "<p>計算中…</p>";
-      google.script.run.withSuccessHandler(function (row) {
-        submit.disabled = false;
-        var enough = row.accumulated >= row.downPayment;
-        var lines = [
-          ["資料", row.period + "（" + row.source + "）"],
-          ["房價", money(row.housePriceWan) + " 萬元"],
-          ["頭期款", money(row.downPayment) + " 元"],
-          [row.etf + " 年化", row.cagrPct + "%"],
-          ["每月需投入", money(row.monthlyNeeded) + " 元"],
-          ["每月需投入（保守 7%）", money(row.monthlyNeededConservative) + " 元"]
-        ];
-        if (Number(document.getElementById("monthly").value) > 0) {
-          lines.push(["每月投入後可累積", money(row.accumulated) + " 元"]);
-          lines.push(["是否付得起", enough ? "可付" : "不足"]);
+      submit.textContent = '開始試算';
+      errorBox.hidden = true;
+      if (!results.hidden) results.dataset.stale = 'true';
+      var entry = choices.etfs.find(function(r) { return r.symbol === symbol; });
+      if(!entry || !entry.eligible) {
+        text('etfSource', entry ? entry.reasonText : '目前沒有符合資料規則的 ETF。');
+        setStatus('尚無可用 ETF 資料，不能試算；未使用測試資料。');
+        return;
+      }
+      text('etfSource', '正在讀取 ' + symbol + ' 的價格與房市資料…');
+      setStatus('正在讀取所選 ETF；完成後才能試算。');
+      google.script.run.withSuccessHandler(function(data) {
+        if(sequence !== selectionToken || symbol !== document.getElementById('etf').value) return;
+        if(!data || data.mode !== 'LIVE' || data.version !== EXPECTED_CALC_VERSION || data.symbol !== symbol ||
+           !/^mysql2-[a-f0-9]{24}$/.test(data.snapshotId || '') || !Number.isFinite(data.annualReturn)) {
+          showError(new Error('所選 ETF 回覆或版本不一致，未啟用試算。'));
+          setStatus('ETF 載入失敗，請重試。');
+          return;
         }
-        result.innerHTML = "<table>" + lines.map(function (line) {
-          return "<tr><td>" + line[0] + "</td><td>" + line[1] + "</td></tr>";
-        }).join("") + "</table>";
-      }).withFailureHandler(function (err) {
+        selectedData = data;
+        choices.snapshotId = data.snapshotId;
+        text('etfSource', data.symbol + ' ' + data.name + '｜' + data.priceStart + '～' + data.priceEnd + '，' + data.observations + ' 筆。歷史 CAGR ' + percent(data.annualReturn) + '，不是未來報酬預測。');
         submit.disabled = false;
+        setStatus('ETF 資料已載入。請設定條件並按「開始試算」。');
+      }).withFailureHandler(function(err) {
+        if(sequence !== selectionToken || symbol !== document.getElementById('etf').value) return;
+        text('etfSource', '所選 ETF 載入失敗；未使用其他 ETF 的資料。');
         showError(err);
-      }).calculate({
-        city: document.getElementById("city").value,
-        etf: document.getElementById("etf").value,
-        years: document.getElementById("years").value,
-        monthly: document.getElementById("monthly").value
-      });
+        setStatus('ETF 載入失敗，請重新讀取或選擇其他 ETF。');
+      }).getEtfSnapshot(symbol);
+    }
+    document.getElementById('reloadEtf').addEventListener('click', function() { if(choices) loadSelected(); });
+    document.getElementById('reset').addEventListener('click', function () {
+      if (!choices) return;
+      token += 1;
+      applyDefaults();
+      results.hidden = true;
+      results.dataset.stale = 'false';
+      empty.hidden = false;
+      errorBox.hidden = true;
+      submit.disabled = true;
+      submit.textContent = '開始試算';
+      loadSelected();
     });
 
-    function showError(err) {
-      result.hidden = false;
-      result.innerHTML = "<p class=\"error\">" + (err.message || err) + "</p>";
+    form.addEventListener('submit', function (event) {
+      event.preventDefault();
+      if (!choices || !selectedReady() || !form.reportValidity()) return;
+      var requestToken = ++token;
+      var input = {
+        snapshotId: choices.snapshotId,
+        city: document.getElementById('city').value,
+        etf: document.getElementById('etf').value,
+        transactionType: document.getElementById('transactionType').value,
+        scenario: document.getElementById('scenario').value,
+        returnMode: document.getElementById('returnMode').value,
+        annualReturnPercent: document.getElementById('annualReturnPercent').value,
+        houseGrowthPercent: document.getElementById('houseGrowthPercent').value,
+        years: document.getElementById('years').value,
+        monthly: document.getElementById('monthly').value,
+        downPaymentRatio: Number(document.getElementById('downPaymentPercent').value) / 100
+      };
+      submit.disabled = true;
+      submit.textContent = '計算中…';
+      errorBox.hidden = true;
+      if (!results.hidden) results.dataset.stale = 'true';
+      setStatus('正在使用同一批雲端資料重新計算…');
+      google.script.run.withSuccessHandler(function (row) {
+        if (requestToken !== token) return;
+        submit.disabled = false;
+        submit.textContent = '開始試算';
+        try {
+          renderResult(row);
+          setStatus('試算完成：' + (row.achieved ? '試算達標。' : '頭期款不足。') + '以下為雲端資料與目前假設的結果。');
+        } catch (err) {
+          results.hidden = true;
+          empty.hidden = false;
+          showError(err);
+          setStatus('結果未完成呈現，請重新試算。');
+        }
+      }).withFailureHandler(function (err) {
+        if (requestToken !== token) return;
+        submit.disabled = false;
+        submit.textContent = '開始試算';
+        showError(err);
+        setStatus('試算失敗，先前結果尚未更新。請檢查條件後再試。');
+      }).calculate(input);
+    });
+
+    function renderResult(row) {
+      if (!row || row.mode !== 'LIVE' || row.version !== choices.version || row.snapshotId !== choices.snapshotId || !Array.isArray(row.timeline) || !row.params || row.params.etf !== document.getElementById('etf').value) throw new Error('資料／計算版本不一致，請重新整理；請使用同一組 v4 程式。');
+      if (!Number.isFinite(row.assets) || row.assets < 0 || !Number.isFinite(row.downPaymentTarget) || row.downPaymentTarget <= 0 || typeof row.achieved !== 'boolean') throw new Error('試算金額無效，請重新試算。');
+      var p = row.params;
+      var scenario = choices.scenarios.find(function (s) { return s.id === p.scenario; });
+      document.getElementById('outcome').dataset.achieved = String(row.achieved);
+      document.getElementById('successIcon').toggleAttribute('hidden', !row.achieved);
+      document.getElementById('shortfallIcon').toggleAttribute('hidden', row.achieved);
+      text('outcomeContext', '依目前假設・' + p.years + ' 年後');
+      text('outcomeTitle', row.achieved ? '試算達標' : '頭期款不足');
+      text('outcomeDescription', row.achieved ? '預估資產足以支付頭期款' : '預估資產尚未達到頭期款目標');
+      text('selectionSummary', p.city + '／' + p.transactionType + '／30 坪／' + p.etf + '／' + p.years + ' 年／頭期款 ' + percent(p.downPaymentRatio));
+      // 只在顯示層取整，差額使用同一組顯示金額；不改計算結果或達標判定。
+      var assetsShown = Math.round(row.assets);
+      var targetShown = Math.round(row.downPaymentTarget);
+      var differenceShown = Math.abs(targetShown - assetsShown);
+      text('assetsValue', money(assetsShown));
+      text('targetValue', money(targetShown));
+      text('differenceLabel', row.achieved ? '預估超出目標' : '預估還差');
+      text('differenceValue', money(differenceShown));
+      text('roundingNote', '資產與目標四捨五入至整元，差額以兩者顯示金額相減；達標判定使用未取整金額。' +
+        (differenceShown === 0 && row.assets !== row.downPaymentTarget ? '本次未取整差額小於 1 元。' : ''));
+      text('neededValue', money(row.monthlyNeeded));
+      text('additionalNeeded', row.additionalMonthlyNeeded > 0 ? '目前每月投入 ' + money(p.monthly) + '，試算需再增加 ' + money(row.additionalMonthlyNeeded) + '／月。' : '目前每月投入 ' + money(p.monthly) + '，已達試算所需投入。');
+      var readiness = row.assets / row.downPaymentTarget * 100;
+      // 不足但接近 100% 時保留 99.9%，避免取整成 100% 與狀態矛盾。
+      var readinessShown = row.achieved ? Math.max(100, Math.round(readiness * 10) / 10) : Math.min(99.9, Math.round(readiness * 10) / 10);
+      var readinessLabel = new Intl.NumberFormat('zh-TW', { minimumFractionDigits:1, maximumFractionDigits:1 }).format(readinessShown) + '%';
+      text('readinessValue', readinessLabel);
+      var readinessBar = document.getElementById('readinessBar');
+      readinessBar.setAttribute('aria-valuenow', String(Math.min(100, readiness)));
+      readinessBar.setAttribute('aria-valuetext', '目標準備度 ' + readinessLabel + (row.achieved ? '，已達標' : '，尚有缺口'));
+      document.getElementById('readinessFill').style.width = Math.min(100, readiness) + '%';
+      text('principalValue', money(row.principal));
+      text('returnValue', percent(row.annualReturn) + (p.returnMode==='historical' ? '（歷史延伸）' : '（自訂假設）'));
+      text('basePriceValue', money(row.baseHousePrice));
+      text('futurePriceValue', money(row.futureHousePrice));
+      var assumptions = document.getElementById('assumptions');
+      assumptions.replaceChildren();
+      [scenario.label + '：本次房價年成長率 ' + percent(row.houseAnnualGrowth) + '。'].concat(row.assumptions).forEach(function (line) {
+        var li = document.createElement('li'); li.textContent = line; assumptions.appendChild(li);
+      });
+      var body = document.getElementById('yearRows');
+      body.replaceChildren();
+      row.timeline.forEach(function (point) {
+        var tr = document.createElement('tr');
+        [point.year === 0 ? '現在' : '第 ' + point.year + ' 年', money(point.principal), money(point.assets), money(point.downPaymentTarget)].forEach(function (value) {
+          var td = document.createElement('td'); td.textContent = value; tr.appendChild(td);
+        });
+        body.appendChild(tr);
+      });
+      renderChart(row.timeline);
+      text('sourceSummary', row.sourceSummary);
+      var qualityWarnings = document.getElementById('qualityWarnings');
+      qualityWarnings.replaceChildren();
+      row.warnings.forEach(function(line){var li=document.createElement('li');li.textContent=line;qualityWarnings.appendChild(li);});
+      text('version', '資料模式：雲端讀取｜介面版本：' + UI_VERSION + '｜計算版本：' + row.version + '｜資料版本：' + row.snapshotId + '｜讀取時間：' + row.queriedAt);
+      results.dataset.stale = 'false';
+      results.hidden = false;
+      empty.hidden = true;
+    }
+
+    function svgElement(name, attributes, content) {
+      var node = document.createElementNS('http://www.w3.org/2000/svg', name);
+      Object.keys(attributes || {}).forEach(function (key) { node.setAttribute(key, attributes[key]); });
+      if (content !== undefined) node.textContent = content;
+      return node;
+    }
+    function renderChart(points) {
+      var width = 720, height = 350, left = 68, right = 22, top = 24, bottom = 42;
+      var plotWidth = width - left - right, plotHeight = height - top - bottom;
+      var maxValue = Math.max.apply(null, points.map(function (p) { return Math.max(p.assets, p.downPaymentTarget, p.principal); }));
+      var yMax = Math.max(100000, Math.ceil(maxValue / 500000) * 500000);
+      var lastYear = points[points.length - 1].year;
+      function x(year) { return left + plotWidth * year / lastYear; }
+      function y(value) { return top + plotHeight * (1 - value / yMax); }
+      var svg = svgElement('svg', { viewBox:'0 0 ' + width + ' ' + height, role:'img', 'aria-labelledby':'chartTitle chartDescription' });
+      svg.appendChild(svgElement('title', { id:'chartTitle' }, '年度資產、頭期款目標與累計本金比較'));
+      svg.appendChild(svgElement('desc', { id:'chartDescription' }, '橫軸為現在至第 ' + lastYear + ' 年，縱軸為新臺幣萬元。綠色實線為資產、棕色虛線為頭期款目標、灰色點線為本金。完整數值請展開年度數據。'));
+      for (var tick = 0; tick <= 5; tick++) {
+        var value = yMax * tick / 5;
+        svg.appendChild(svgElement('line', { x1:left, x2:width-right, y1:y(value), y2:y(value), stroke:'#dce5df' }));
+        svg.appendChild(svgElement('text', { x:left-10, y:y(value)+5, 'text-anchor':'end', fill:'#52635f', 'font-size':13 }, new Intl.NumberFormat('zh-TW', { maximumFractionDigits:0 }).format(value / 10000)));
+      }
+      var years = Array.from(new Set([0, Math.round(lastYear/4), Math.round(lastYear/2), Math.round(lastYear*3/4), lastYear]));
+      years.forEach(function (year) {
+        svg.appendChild(svgElement('text', { x:x(year), y:height-13, 'text-anchor':'middle', fill:'#52635f', 'font-size':13 }, year === 0 ? '現在' : year + ' 年'));
+      });
+      [{ key:'principal', color:'#697985', dash:'2 5' }, { key:'downPaymentTarget', color:'#a15120', dash:'8 5' }, { key:'assets', color:'#176248', dash:'' }].forEach(function (series) {
+        var coordinates = points.map(function (p) { return x(p.year).toFixed(2) + ',' + y(p[series.key]).toFixed(2); }).join(' ');
+        svg.appendChild(svgElement('polyline', { points:coordinates, fill:'none', stroke:series.color, 'stroke-width':3, 'stroke-dasharray':series.dash, 'stroke-linejoin':'round', 'stroke-linecap':'round' }));
+      });
+      document.getElementById('chart').replaceChildren(svg);
+    }
+
+    if (typeof google === 'undefined' || !google.script || !google.script.run) {
+      showError(new Error('請從 Apps Script 的網頁應用程式網址開啟，直接開本機 HTML 無法呼叫 GAS。'));
+      setStatus('此頁尚未連接 Apps Script 執行環境。');
+    } else {
+      google.script.run.withSuccessHandler(function (data) {
+        if (!data || data.mode !== 'LIVE' || data.version !== EXPECTED_CALC_VERSION || !Array.isArray(data.etfs)) { showError(new Error('請確認程式檔案都使用 v4，不能混用舊版。')); setStatus('選項載入失敗，請重新整理。'); return; }
+        choices = data;
+        document.getElementById('dataBanner').textContent = '雲端資料｜讀取時間：' + data.queriedAt + '。資料來源期間與限制請見試算結果。';
+        fillOptions('city', data.cities);
+        fillOptions('transactionType', data.transactionTypes);
+        fillOptions('etf', data.etfs, 'symbol', function (row) { return row.symbol + ' ' + row.name + (row.eligible ? '' : '（不可用）'); });
+        text('etfHelp', '資料庫清單 ' + data.total + ' 檔，其中 ' + data.eligibleCount + ' 檔符合目前資料規則；依代號排序，非推薦排序。');
+        var unavailable = document.getElementById('unavailableEtfs');
+        unavailable.replaceChildren();
+        data.etfs.filter(function(r) { return !r.eligible; }).forEach(function(r) {
+          var li=document.createElement('li');li.textContent=r.symbol+' '+r.name+'：'+r.reasonText;unavailable.appendChild(li);
+        });
+        if(!unavailable.children.length) { var li=document.createElement('li');li.textContent='本次清單沒有停用項目。';unavailable.appendChild(li); }
+        fillOptions('scenario', data.scenarios, 'id', function (row) { return row.label; });
+        applyDefaults();
+        fields.disabled = false;
+        loadSelected();
+      }).withFailureHandler(function (err) {
+        document.getElementById('dataBanner').textContent = '雲端資料連線失敗；尚未取得可用資料。';
+        showError(err);
+        setStatus('選項載入失敗，請重新整理頁面。');
+      }).listChoices();
     }
   </script>
 </body>
