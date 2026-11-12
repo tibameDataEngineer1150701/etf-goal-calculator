@@ -198,6 +198,127 @@ Local environment variables are listed at the top of `crawlers/etf/goal_calculat
 
 ## Project issues
 
+1. Data Ingestion
+Technical Challenge: Data Source Access Restrictions and Multi-Source Data Ingestion
+1.1 Web Scraping Access Restrictions
+- Problem: TLS certificate verification issues or website access restrictions on the Ministry of the Interior's Real Estate Transaction Price Registration website prevented the crawler from retrieving data successfully.
+- Solution: Tested verify=False for specific data sources to troubleshoot certificate verification issues. Valid certificate verification should still be maintained in production environments.
+- Recommendation: For production environments, configure the appropriate CA certificates or certificate chain instead of disabling certificate verification.
+1.2 Complex Filtering Conditions on the Real Estate Transaction Website
+- Problem: The website's homepage required multiple filtering conditions to retrieve transaction data, increasing crawler complexity and maintenance costs.
+- Solution: Switched to scraping the authenticated page and downloading quarterly ZIP archives covering the past ten years, reducing the complexity of data retrieval and filtering.
+1.3 Inconsistent Data Formats Across Multiple Sources
+- Problem: Public datasets from different sources had inconsistent column definitions and file formats, making direct integration difficult.
+- Solution: Developed separate crawler modules for each data source, performed initial data cleaning and column standardization, and consolidated the processed data into Parquet format for downstream analysis.
+1.4 Different Ingestion Methods for Different Data Sources
+- Problem: The ETF master list and historical ETF price data came from different sources, with different data formats and API access methods.
+- Solution:
+  - Used FinMind to retrieve the list of passive ETFs.
+  - Used Yahoo Finance to retrieve price data for ETFs listed on the Taiwan Stock Exchange (.TW) and Taipei Exchange (.TWO).
+  - Developed separate ingestion modules to reduce coupling between data sources.
+1.5 External API Request Failures
+- Problem: Some Yahoo Finance API requests failed, resulting in missing price data for certain ETFs on specific trading days.
+- Solution:
+  - Processed TWSE-listed and TPEx-listed ETFs separately.
+  - Distributed data ingestion tasks to dedicated workers.
+  - Logged failed tasks for subsequent investigation and data retrieval retries.
+
+2. Data Quality
+Technical Challenge: Missing Data, Inconsistent Formats, and Data Completeness Validation
+2.1 Missing or Abnormal Values in HPI and CPI Data
+- Problem: Missing columns, inconsistent data types, abnormal numerical values, or duplicate records could affect CAGR calculation results.
+- Solution: Developed a validate_source_data() function to validate required columns, data types, numerical ranges, and data uniqueness before calculating CAGR.
+2.2 Inconsistent CSV Schemas
+- Problem: Some raw CSV files contained a different number of fields between the header and data rows, resulting in parsing errors or data loss.
+- Solution: Inspected headers and abnormal records, investigated the underlying issues, and normalized inconsistent records instead of directly skipping potentially valid data.
+2.3 Duplicate Records and Invalid Transaction Data
+- Problem: Duplicate transactions, invalid dates, missing values, or non-positive transaction prices could affect statistical results.
+- Solution: Implemented duplicate record detection, transaction date validation, and price range checks. Errors are raised when anomalies are detected, allowing the issues to be identified during processing.
+2.4 Incomplete ETF Price Data
+- Problem: External API request failures could result in inconsistent data coverage and different latest available dates across ETFs.
+- Observed Data: According to the README, price data was successfully retrieved for 236 ETFs on November 9, 2026, compared with 279 ETFs on the previous trading data date, November 6, 2026.
+- Solution and Improvement Areas:
+  - Check data coverage between the ETF master list and price records.
+  - Verify the latest available price date for each ETF.
+  - Identify ETFs with missing price records.
+  - Retry failed tasks and retrieve missing historical data.
+2.5 ETF Price Data Validation
+- Problem: Missing values, non-positive prices, or duplicate records could affect CAGR calculations.
+- Data Validation Rules:
+  - stock_id must not be null.
+  - date must follow the expected date format.
+  - adj_close must be a positive numerical value.
+  - Ensure uniqueness of the composite key (stock_id, date).
+
+3. Data Transformation
+Technical Challenge: Data Standardization and Time-Series Transformation
+3.1 Inconsistent Data Formats and Column Definitions
+- Problem: Real estate transaction data, HPI, and CPI datasets used different column names, date formats, and data structures, making direct calculations and integration difficult.
+- Solution: Used Pandas to transform columns, standardize data types, and clean the datasets.
+3.2 Different Time Granularities Across Data Sources
+- Problem: CPI data was available monthly, whereas HPI and real estate transaction data were available quarterly, making direct integration and comparison difficult.
+- Solution: Converted monthly CPI data into quarterly averages to align the time dimensions across all three datasets.
+3.3 Comparison Between Nominal HPI and Real HPI
+- Problem: The nominal House Price Index (HPI) does not account for changes in consumer prices, making it insufficient to reflect housing price movements after adjusting for inflation.
+- Solution: Normalized CPI to a 2016 base year of 100 and incorporated it into the calculation of the Real House Price Index (Real HPI).
+
+4. Data Selection & Filtering
+Technical Challenge: Selective Extraction from Large Volumes of Raw Data
+4.1 Unnecessary Data Increasing Processing Overhead
+- Problem: Real estate transaction ZIP archives contained multiple types of CSV files. Extracting and cleaning all files would increase disk I/O, storage requirements, and processing time.
+- Solution:
+  - Used zip_ref.namelist() to identify and selectively extract the required CSV files:
+    - A: Existing House Transactions
+    - B: Pre-sale House Transactions
+    - C: Rental Transactions
+  - Excluded unnecessary C CSV files (rental transactions).
+  - Extracted only the required transaction datasets and related schema and manifest files to support subsequent data cleaning.
+4.2 Irrelevant Data Affecting Analytical Results
+- Problem: Some records did not meet the predefined project scope or analytical criteria, such as transactions involving certain luxury residential developments.
+- Solution: Applied additional filters based on transaction type, transaction date, price, and geographic region.
+
+5. Data Integration
+Technical Challenge: Aligning Data Periods Across Cities and Multiple Sources
+5.1 Inconsistent Latest Available Quarters Across Cities
+- Problem: Real estate transaction data was updated at different times across counties and cities. The latest available quarter was therefore not necessarily consistent, potentially introducing temporal bias into comparisons.
+- Solution:
+  - Defined consistent data period alignment rules.
+  - Established a common analysis period based on research requirements.
+  - Checked data coverage across different cities and counties.
+5.2 Integrating Quarterly Data from Multiple Sources
+- Problem: Real estate transaction data, HPI, and CPI datasets had different reporting periods and time field definitions.
+- Solution: Created standardized quarterly fields and used them as common join keys to integrate the datasets and ensure consistent time periods.
+
+6. Data Pipeline Reliability
+Technical Challenge: Long-Running Data Downloads, Interruption Recovery, and Task Monitoring
+6.1 Long-Running Historical Data Downloads and Unexpected Interruptions
+- Problem: Downloading ten years of historical real estate transaction ZIP archives was time-consuming. Unexpected interruptions could result in incomplete downloads or redundant downloads.
+- Solution:
+  - Used zip_path.exists() to check whether a downloaded file already existed.
+  - Used zipfile.is_zipfile() to verify whether the file was a valid ZIP archive, rather than relying solely on file existence to determine download success.
+  - Introduced intervals between quarterly download requests to reduce request frequency.
+  - Maintained error logs to identify failed quarters and support subsequent retries.
+6.2 Independent Execution and Management of Multiple ETL Tasks
+- Problem: Real estate transaction, HPI, and CPI data ingestion and processing involved different workflows. Executing all tasks in a single process would make task management and future scalability more difficult.
+- Solution:
+  - Used Celery to execute asynchronous tasks.
+  - Used RabbitMQ as the message broker.
+  - Created independent queues and workers for different data sources.
+  - Used Flower to monitor task execution status.
+6.3 Execution Environment and Service Management
+- Problem: Multiple services required consistent execution environments and reliable communication between containers.
+- Solution: Used Docker and Docker Compose to build a containerized environment, with Docker Networks to manage inter-service communication.
+
+7. Distributed Task Processing
+Technical Challenge: Task Distribution and Parallel Processing of Large-Scale ETF Price Retrieval Jobs
+7.1 Processing Efficiency of a Single Worker Handling Multiple ETF Tasks
+- Problem: A large number of ETFs required individual historical price retrieval. Assigning all tasks to a single worker could significantly increase processing time.
+- Solution:
+  - Used Celery to create asynchronous tasks.
+  - Used RabbitMQ as the message broker.
+  - Distributed TWSE-listed and TPEx-listed ETF tasks to separate workers.
+  - Used Flower to monitor task execution status.
+  
 ## FAQ
 
 1. HPI Base Period
