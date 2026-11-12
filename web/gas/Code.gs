@@ -1,144 +1,234 @@
 /**
- * 六都頭期款試算網頁。
- * 部署：Apps Script → 專案設定 → 指令碼內容，新增
- *   MYSQL_HOST、MYSQL_PORT、MYSQL_USER、MYSQL_PASSWORD
- * 帳號用 etfgoal。部署 → 新增部署 → 網頁應用程式，
- * 執行身分選自己，存取權選任何人。
+ * v4 團隊連線測試：資料庫清單與單檔快照分離；不回退到三檔測試資料。
+ * API_BASE_URL / API_TOKEN 只使用 GAS 指令碼屬性，禁止放進 HTML。
  */
-
-var CONSERVATIVE_RETURN = 0.07;
+var CALC_VERSION_ = 'gas-live-v4.0-candidate-2026-11-12';
+var CITIES_ = ['臺北市','新北市','桃園市','臺中市','臺南市','高雄市'];
 
 function doGet() {
-  return HtmlService.createHtmlOutputFromFile("Index")
-    .setTitle("ETF 頭期款試算")
-    .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
+  return HtmlService.createHtmlOutputFromFile('Index').setTitle('ETF 購屋試算｜動態資料 v4');
 }
-
-function listChoices() {
-  var conn = openConn_("etf");
+function validSymbol_(symbol) {
+  return typeof symbol==='string' && /^[0-9][A-Z0-9]{3,19}$/.test(symbol);
+}
+function validQueryTime_(value) {
+  var t=Date.parse(value);
+  if(typeof value!=='string'||!/(Z|[+-]\d{2}:\d{2})$/.test(value)||!Number.isFinite(t)||t>Date.now()+300000||Date.now()-t>420000)
+    throw new Error('雲端讀取時間過期或無效，請重新整理；不使用過期資料。');
+}
+function requestApi_(path) {
+  var props=PropertiesService.getScriptProperties();
+  var base=String(props.getProperty('API_BASE_URL')||'').replace(/\/$/,'');
+  var token=String(props.getProperty('API_TOKEN')||'');
+  if(!/^https:\/\/[A-Za-z0-9](?:[A-Za-z0-9.-]*[A-Za-z0-9])?(?::443)?$/.test(base)||token.length<32)
+    throw new Error('尚未設定有效 HTTPS API_BASE_URL 或 API_TOKEN。');
+  var response;
   try {
-    var etfs = query_(conn, "SELECT stock_id, ROUND(cagr * 100, 2) AS cagr_pct FROM etf_cagr ORDER BY stock_id");
-    var cities = loadCities_(conn);
-    return { etfs: etfs, cities: cities.map(function (row) { return row.city; }) };
-  } finally {
-    conn.close();
+    response=UrlFetchApp.fetch(base+path,{method:'get',headers:{Authorization:'Bearer '+token},
+      followRedirects:false,validateHttpsCertificates:true,muteHttpExceptions:true});
+  } catch(e) { throw new Error('無法連接雲端 API；未切換成範例資料。'); }
+  var status=response.getResponseCode(), body=response.getContentText();
+  if(status!==200) {
+    var messages={401:'API 授權失敗，請管理員確認設定。',404:'找不到 ETF 或新版 API 路由；請確認已配套安裝 v4。',
+      409:'清單已更新，請重新整理。',422:'所選 ETF 資料不足或不可用，請重新整理清單。',
+      429:'團隊測試服務目前較忙，請等待一分鐘後重試。',
+      503:'資料服務無法讀取或來源不完整，未使用替代資料。'};
+    throw new Error(messages[status]||'雲端資料讀取失敗（HTTP '+status+'）。');
   }
+  // Bound each page / selected snapshot, not a combined all-ETF cache.
+  if(body.length>90000) throw new Error('單次資料超過大小上限，未截斷或替代資料。');
+  var envelope;
+  try { envelope=JSON.parse(body); } catch(e) { throw new Error('API 回傳格式無效。'); }
+  if(!envelope||envelope.mode!=='LIVE') throw new Error('API 資料模式錯誤。');
+  return envelope;
+}
+function listChoices() {
+  var rows=[], seen={}, offset=0, identity=null, total=null, available=null, queriedAt=null;
+  for(var page=0;page<20;page++) {
+    var c=requestApi_('/v2/etfs?limit=100&offset='+offset+(identity?'&catalog_id='+encodeURIComponent(identity):'')).catalog;
+    if(!c||c.schemaVersion!==2||!/^catalog2-[a-f0-9]{24}$/.test(c.catalogId||'')||
+       !Number.isInteger(c.total)||c.total<0||c.total>2000||!Number.isInteger(c.eligibleCount)||
+       c.eligibleCount<0||c.eligibleCount>c.total||!Array.isArray(c.items)||c.items.length>100||c.offset!==offset)
+      throw new Error('ETF 清單契約無效。');
+    validQueryTime_(c.queriedAt);
+    if(identity&&(identity!==c.catalogId||total!==c.total||available!==c.eligibleCount))
+      throw new Error('分頁清單版本不一致，請重新整理。');
+    identity=c.catalogId;total=c.total;available=c.eligibleCount;queriedAt=c.queriedAt;
+    c.items.forEach(function(r) {
+      if(!r||!validSymbol_(r.symbol)||seen[r.symbol]||typeof r.name!=='string'||!r.name.trim()||r.name.length>100||
+         typeof r.eligible!=='boolean'||!Array.isArray(r.reasons)||typeof r.reasonText!=='string'||
+         (r.eligible&&(r.reasons.length!==0||r.reasonText!==''))||(!r.eligible&&(!r.reasons.length||!r.reasonText)))
+        throw new Error('ETF 清單欄位重複或無效。');
+      seen[r.symbol]=true;rows.push(r);
+    });
+    offset+=c.items.length;
+    if(c.nextOffset===null) {
+      if(offset!==total||rows.filter(function(r){return r.eligible;}).length!==available) throw new Error('ETF 清單不完整。');
+      break;
+    }
+    if(c.items.length===0||c.nextOffset!==offset||offset>=total) throw new Error('ETF 分頁錯誤。');
+  }
+  if(rows.length!==total) throw new Error('ETF 清單超過載入上限；未顯示截斷清單。');
+  var first=rows.find(function(r){return r.eligible;});
+  return {mode:'LIVE',version:CALC_VERSION_,catalogId:identity,queriedAt:queriedAt,etfs:rows,
+    total:total,eligibleCount:available,cities:CITIES_.slice(),transactionTypes:['成屋買賣','預售屋買賣'],
+    scenarios:[{id:'hpi10',label:'近 10 年 HPI 歷史延伸'},{id:'hpi5',label:'近 5 年 HPI 歷史延伸'},{id:'custom',label:'自訂房價年成長率'}],
+    defaults:{city:'臺中市',etf:first?first.symbol:'',transactionType:'成屋買賣',scenario:'hpi10',years:10,monthly:20000,
+      downPaymentPercent:20,returnMode:'custom',annualReturnPercent:0,houseGrowthPercent:0},
+    warning:'清單依資料庫與可用性規則產生，並非已確認全部現行上市 ETF。讀取時間不等於來源更新時間。'};
+}
+function loadSnapshot_(symbol, expectedId) {
+  if(!validSymbol_(symbol)) throw new Error('ETF 代號格式無效。');
+  var cache=CacheService.getScriptCache(), s, cached=expectedId?cache.get('live4:'+expectedId):null;
+  if(cached) {
+    try { s=JSON.parse(cached); } catch(e) { throw new Error('快取格式無效，請重新整理。'); }
+  } else { s=requestApi_('/v2/snapshot?symbol='+encodeURIComponent(symbol)).snapshot; }
+  validateLiveSnapshot_(s);
+  if(s.etfs[0].symbol!==symbol) throw new Error('ETF 與資料版本不一致，已停止試算。');
+  if(expectedId&&s.id!==expectedId) throw new Error('來源資料已更新，請重新載入所選 ETF。');
+  if(!cached) cache.put('live4:'+s.id,JSON.stringify(s),300);
+  return s;
+}
+function validateLiveSnapshot_(s) {
+  validateSnapshot_(s);
+  if(s.schemaVersion!==2||!/^mysql2-[a-f0-9]{24}$/.test(s.id||'')||s.etfs.length!==1)
+    throw new Error('雲端單檔資料契約無效。');
+  validQueryTime_(s.queriedAt);
+  var r=s.etfs[0], e=s.eligibility;
+  if(!e||e.symbol!==r.symbol||e.eligible!==true||!Array.isArray(e.reasons)||e.reasons.length||
+     typeof r.name!=='string'||!r.name.trim()||r.name.length>100)
+    throw new Error('所選 ETF 不可用。');
+  var start=Date.parse(r.priceStart+'T00:00:00Z'),end=Date.parse(r.priceEnd+'T00:00:00Z');
+  if(!Number.isFinite(start)||!Number.isFinite(end)||end-start<365*86400000||
+     new Date(start).toISOString().slice(0,10)!==r.priceStart||new Date(end).toISOString().slice(0,10)!==r.priceEnd||
+     r.priceStart!==s.priceStart||r.priceEnd!==s.priceEnd||e.priceStart!==r.priceStart||e.priceEnd!==r.priceEnd)
+    throw new Error('ETF 日期無效或資料版本不一致。');
+}
+function getEtfSnapshot(symbol) {
+  var s=loadSnapshot_(symbol),r=s.etfs[0];
+  return {mode:'LIVE',version:CALC_VERSION_,snapshotId:s.id,queriedAt:s.queriedAt,
+    symbol:r.symbol,name:r.name,priceStart:r.priceStart,priceEnd:r.priceEnd,observations:r.observations,
+    annualReturn:etfCagr_(r,s)};
 }
 
 function calculate(input) {
-  var etf = String(input.etf || "0050");
-  var city = String(input.city || "");
-  var years = Number(input.years || 10);
-  var monthly = Number(input.monthly || 0);
-  if (!city) {
-    throw new Error("請選擇城市");
+  if (!input || !/^mysql2-[a-f0-9]{24}$/.test(input.snapshotId || '')) throw new Error('缺少選項資料版本，請重新整理頁面。');
+  var s = loadSnapshot_(input.etf, input.snapshotId);
+  var p = validateInput_(input,s);
+  var house = s.houses.filter(function (r) {return r.city===p.city;})[0];
+  var etf = s.etfs.filter(function (r) {return r.symbol===p.etf;})[0];
+  var historic = etfCagr_(etf,s);
+  var annual = p.returnMode==='historical' ? historic : p.annualReturnPercent/100;
+  var growth = p.scenario==='custom' ? p.houseGrowthPercent/100 : Math.pow(house.hpi/(p.scenario==='hpi5'?house.hpi5:house.hpi10),1/(p.scenario==='hpi5'?5:10))-1;
+  var unitPrice = p.transactionType==='成屋買賣' ? house.existing : house.presale;
+  var count = p.transactionType==='成屋買賣' ? house.existingCount : house.presaleCount;
+  var base = unitPrice*30*3.3058;
+  var timeline = [];
+  for (var y=0;y<=p.years;y++) {
+    timeline.push({year:y,principal:p.monthly*12*y,assets:futureValue_(p.monthly,annual,y),downPaymentTarget:base*Math.pow(1+growth,y)*p.downPaymentRatio});
   }
-  if (!(years > 0)) {
-    throw new Error("年數要大於 0");
-  }
-
-  var conn = openConn_("etf");
-  try {
-    var returns = query_(conn, "SELECT cagr FROM etf_cagr WHERE stock_id = ?", [etf]);
-    if (!returns.length) {
-      throw new Error("找不到這檔 ETF 的年化報酬：" + etf);
-    }
-    var annual = Number(returns[0].cagr);
-    var cities = loadCities_(conn);
-    var match = cities.filter(function (row) { return row.city === city; })[0];
-    if (!match) {
-      throw new Error("找不到這個城市的房價：" + city);
-    }
-    var target = Number(match.down_payment);
-    return {
-      city: city,
-      etf: etf,
-      period: match.period,
-      source: match.source,
-      housePriceWan: Number(match.house_price_wan),
-      downPayment: target,
-      cagrPct: Math.round(annual * 10000) / 100,
-      years: years,
-      monthlyNeeded: Math.round(monthlyNeeded_(target, annual, years)),
-      monthlyNeededConservative: Math.round(monthlyNeeded_(target, CONSERVATIVE_RETURN, years)),
-      accumulated: monthly > 0 ? Math.round(futureValue_(monthly, annual, years)) : 0,
-      accumulatedConservative: monthly > 0 ? Math.round(futureValue_(monthly, CONSERVATIVE_RETURN, years)) : 0
-    };
-  } finally {
-    conn.close();
-  }
+  var final = timeline[timeline.length-1];
+  var needed = Math.ceil(final.downPaymentTarget/futureValue_(1,annual,p.years));
+  var delta = final.assets-final.downPaymentTarget;
+  var warnings = [
+    '資料經 HTTPS API 自團隊 MySQL 取得；讀取時間 '+s.queriedAt+'，可能使用短暫快取。來源內容尚未與官方逐筆資料交叉驗證。',
+    '原上游程式只依房地交易標的篩選；主要用途是否住宅、車位拆價與排除特殊交易仍待確認。30 坪金額是單價換算參考，不是實際 30 坪住宅成交中位總價。',
+    'ETF 歷史 CAGR 僅描述這段期間；使用固定歷史高報酬推估未來可能過度樂觀，請同時測試零報酬與負報酬。',
+    '本版不使用未定案的「樂觀加 2 個百分點」，也不把 5 年／10 年歷史成長率稱為保守或樂觀。'
+  ];
+  var age = Math.floor((Date.now()-Date.parse(s.capturedDate+'T00:00:00+08:00'))/86400000);
+  if(age>0) warnings.unshift('取得資料的日期較早，請重新整理；來源期間請見下方。');
+  var result = {
+    mode:'LIVE', version:CALC_VERSION_, snapshotId:s.id, queriedAt:s.queriedAt, params:p, propertyAreaPing:30,
+    annualReturn:annual, historicalAnnualReturn:historic, houseAnnualGrowth:growth,
+    baseHousePrice:base, futureHousePrice:base*Math.pow(1+growth,p.years),
+    currentDownPaymentTarget:base*p.downPaymentRatio, downPaymentTarget:final.downPaymentTarget,
+    assets:final.assets, principal:final.principal, gap:Math.max(0,-delta), surplus:Math.max(0,delta),
+    achieved:delta>=0, monthlyNeeded:needed, additionalMonthlyNeeded:Math.max(0,needed-p.monthly), timeline:timeline,
+    warnings:warnings,
+    sourceSummary:'房地交易 '+s.housePeriod+'／'+count+' 筆；HPI '+s.hpiPeriod+'；ETF '+etf.priceStart+'～'+etf.priceEnd+'／'+etf.observations+' 筆。',
+    assumptions:[
+      '房價基準＝每平方公尺中位單價 '+unitPrice+' 元 × 30 坪 × 3.3058；面積口徑沿用上游設定。',
+      '房價 CAGR＝HPI 期末／期初的 1／年數 次方 − 1；選擇自訂時則使用輸入值。房價與投資使用相同的未來年限。',
+      'ETF 端點='+etf.first+' → '+etf.last+'；歷史 CAGR 按實際日數／365 重算，不沿用舊 etf_cagr。',
+      '有效月報酬率＝(1＋有效年報酬率)^(1/12)−1；初始資產 0，每月底投入，非每月初投入。',
+      '未來頭期款＝基準價格 × (1＋房價年成長率)^年限 × 使用者頭期款比例。',
+      '每月所需投入向上取整元；計算過程保留精度，差額與表格只在顯示時取整。',
+      '全部為名目金額；不混用 real_hpi 與名目 ETF 報酬，也未額外計入 CPI。',
+      '未另計交易稅費、買賣手續費、購屋附帶費、貸款資格或月供；adjusted close 的配息調整口徑仍需團隊確認，不另加一次股息。',
+      '固定報酬不包含市場波動、順序風險或達標機率；0% 預設只是測試起點，不是報酬預測。'
+    ]
+  };
+  [result.assets,result.futureHousePrice,result.downPaymentTarget,result.monthlyNeeded].forEach(function (n) {if(!Number.isFinite(n)||Math.abs(n)>Number.MAX_SAFE_INTEGER) throw new Error('計算超出可可靠顯示整元的範圍，請降低年限或報酬假設。');});
+  return result;
 }
 
-function loadCities_(conn) {
-  var housing = openConn_("housing");
-  try {
-    var fromTarget = query_(housing,
-      "SELECT CASE region WHEN '臺北市' THEN '台北市' WHEN '臺中市' THEN '台中市' WHEN '臺南市' THEN '台南市' ELSE region END AS city, " +
-      "ROUND(house_price / 10000) AS house_price_wan, ROUND(down_payment_target) AS down_payment, " +
-      "house_price_period AS period, 'down_pmt_target' AS source " +
-      "FROM down_pmt_target WHERE transaction_type = ? AND scenario = ?",
-      ["成屋買賣", "中性"]);
-    if (fromTarget.length) {
-      return fromTarget;
-    }
-    return query_(housing,
-      "SELECT city, median_total_wan AS house_price_wan, ROUND(median_total_wan * 10000 * 0.2) AS down_payment, " +
-      "period, 'city_house_price' AS source FROM city_house_price");
-  } finally {
-    housing.close();
-  }
+function validateInput_(v,s) {
+  if(!v || typeof v!=='object' || Array.isArray(v)) throw new Error('請提供完整條件。');
+  if(!s.houses.some(function(r){return r.city===v.city;})) throw new Error('城市不在已查核快照中。');
+  if(!s.etfs.some(function(r){return r.symbol===v.etf;})) throw new Error('ETF 不在已查核快照中。');
+  if(['成屋買賣','預售屋買賣'].indexOf(v.transactionType)<0) throw new Error('交易類型無效。');
+  if(['hpi5','hpi10','custom'].indexOf(v.scenario)<0) throw new Error('房價情境無效。');
+  if(['custom','historical'].indexOf(v.returnMode)<0) throw new Error('請明確選擇報酬假設。');
+  return {city:v.city,etf:v.etf,transactionType:v.transactionType,scenario:v.scenario,returnMode:v.returnMode,
+    years:numberInput_(v.years,'年限',1,30,true), monthly:numberInput_(v.monthly,'月投入',0,1000000,true),
+    downPaymentRatio:numberInput_(v.downPaymentRatio,'頭期款比例',0.1,0.8,false),
+    annualReturnPercent:v.returnMode==='custom'?numberInput_(v.annualReturnPercent,'自訂年報酬率',-90,100,false):null,
+    houseGrowthPercent:v.scenario==='custom'?numberInput_(v.houseGrowthPercent,'自訂房價年成長率',-50,50,false):null};
 }
 
-function openConn_(database) {
-  var props = PropertiesService.getScriptProperties();
-  var host = props.getProperty("MYSQL_HOST");
-  var port = props.getProperty("MYSQL_PORT") || "3306";
-  var user = props.getProperty("MYSQL_USER") || "etfgoal";
-  var password = props.getProperty("MYSQL_PASSWORD");
-  if (!host || !password) {
-    throw new Error("尚未設定 MYSQL_HOST 和 MYSQL_PASSWORD。VM 的外部 IP 確定後，填到指令碼內容。");
-  }
-  var url = "jdbc:mysql://" + host + ":" + port + "/" + database + "?useSSL=false&characterEncoding=UTF-8";
-  return Jdbc.getConnection(url, user, password);
+function numberInput_(value,label,min,max,integer) {
+  if(typeof value!=='number' && typeof value!=='string') throw new Error(label+'必須是數字。');
+  if(typeof value==='string' && !/^-?(?:\d+\.?\d*|\.\d+)$/.test(value.trim())) throw new Error(label+'必須是有效數字。');
+  var n=Number(value);
+  if(!Number.isFinite(n)||n<min||n>max||(integer&&!Number.isInteger(n))) throw new Error(label+'超出範圍或格式無效。');
+  return n;
 }
 
-function query_(conn, sql, params) {
-  var stmt = params && params.length ? conn.prepareStatement(sql) : conn.createStatement();
-  if (params && params.length) {
-    params.forEach(function (value, index) {
-      stmt.setString(index + 1, String(value));
-    });
-  }
-  var rs = params && params.length ? stmt.executeQuery() : stmt.executeQuery(sql);
-  var meta = rs.getMetaData();
-  var count = meta.getColumnCount();
-  var rows = [];
-  while (rs.next()) {
-    var row = {};
-    for (var i = 1; i <= count; i++) {
-      row[meta.getColumnLabel(i)] = rs.getString(i);
-    }
-    rows.push(row);
-  }
-  rs.close();
-  stmt.close();
-  return rows;
+function etfCagr_(r,s) {
+  var days=(Date.parse(r.priceEnd+'T00:00:00Z')-Date.parse(r.priceStart+'T00:00:00Z'))/86400000;
+  return Math.pow(r.last/r.first,365/days)-1;
 }
 
-function monthlyNeeded_(target, annualReturn, years) {
-  var i = annualReturn / 12;
-  var n = years * 12;
-  if (i === 0) {
-    return target / n;
-  }
-  return target * i / (Math.pow(1 + i, n) - 1);
+function futureValue_(monthly,annual,years) {
+  if(!Number.isFinite(monthly)||monthly<0||!Number.isFinite(annual)||annual<=-1||!Number.isFinite(years)||years<0||!Number.isInteger(years*12)) throw new Error('複利參數無效。');
+  var n=years*12;
+  if(n===0||monthly===0) return 0;
+  var logMonth=Math.log1p(annual)/12;
+  var rate=Math.expm1(logMonth);
+  return rate===0 ? monthly*n : monthly*Math.expm1(n*logMonth)/rate;
 }
 
-function futureValue_(monthly, annualReturn, years) {
-  var i = annualReturn / 12;
-  var n = years * 12;
-  if (i === 0) {
-    return monthly * n;
-  }
-  return monthly * ((Math.pow(1 + i, n) - 1) / i);
+function validateSnapshot_(s) {
+  if(!s || !Array.isArray(s.houses)||!Array.isArray(s.etfs)||s.houses.length!==6||s.etfs.length===0) throw new Error('快照資料不完整；不使用替代假資料。');
+  [s.capturedDate,s.priceStart,s.priceEnd].forEach(function(d){if(!/^\d{4}-\d{2}-\d{2}$/.test(d)||!Number.isFinite(Date.parse(d+'T00:00:00Z'))||new Date(d+'T00:00:00Z').toISOString().slice(0,10)!==d) throw new Error('快照日期無效。');});
+  if(Date.parse(s.priceEnd)<Date.parse(s.priceStart)+365*86400000 || s.priceEnd>s.capturedDate) throw new Error('ETF 期間不足一年或超過擷取日。');
+  [s.housePeriod,s.hpiPeriod,s.hpi5Period,s.hpi10Period].forEach(function(q){if(!/^\d{4}Q[1-4]$/.test(q)) throw new Error('季度格式無效。');});
+  if(s.hpi5Period!==String(Number(s.hpiPeriod.slice(0,4))-5)+s.hpiPeriod.slice(4)||s.hpi10Period!==String(Number(s.hpiPeriod.slice(0,4))-10)+s.hpiPeriod.slice(4)) throw new Error('HPI 比較期間不一致。');
+  var cities={}, symbols={};
+  s.houses.forEach(function(r){
+    if(['臺北市','新北市','桃園市','臺中市','臺南市','高雄市'].indexOf(r.city)<0||cities[r.city]) throw new Error('房市城市重複或無效。');
+    cities[r.city]=true;
+    ['existing','presale','hpi','hpi5','hpi10'].forEach(function(k){if(typeof r[k]!=='number'||!Number.isFinite(r[k])||r[k]<=0) throw new Error('房價或 HPI 缺漏／無效：'+r.city);});
+    ['existingCount','presaleCount'].forEach(function(k){if(!Number.isInteger(r[k])||r[k]<=0) throw new Error('成交筆數無效。');});
+  });
+  s.etfs.forEach(function(r){
+    if(typeof r.symbol!=='string'||!/^[0-9][A-Z0-9]{3,19}$/.test(r.symbol)||symbols[r.symbol]) throw new Error('ETF 代號重複或無效。');
+    symbols[r.symbol]=true;
+    if(!Number.isFinite(r.first)||r.first<=0||!Number.isFinite(r.last)||r.last<=0||!Number.isInteger(r.observations)||r.observations<240) throw new Error('ETF 價格或筆數無效。');
+  });
+}
+
+function runLiveChecks() {
+  var c=listChoices(),d=c.defaults;
+  if(!d.etf) throw new Error('目前沒有符合資料規則的 ETF，未使用測試資料。');
+  var selected=getEtfSnapshot(d.etf);
+  var p={snapshotId:selected.snapshotId,city:d.city,etf:d.etf,transactionType:d.transactionType,scenario:d.scenario,
+    years:10,monthly:20000,downPaymentRatio:.2,returnMode:'custom',annualReturnPercent:0,houseGrowthPercent:0};
+  var a=calculate(p);
+  if(a.assets!==2400000||!(a.downPaymentTarget>0)) throw new Error('基準試算失敗。');
+  p.downPaymentRatio=.4;
+  if(Math.abs(calculate(p).downPaymentTarget-2*a.downPaymentTarget)>.01) throw new Error('比例連動失敗。');
+  var report={version:CALC_VERSION_,total:c.total,eligibleCount:c.eligibleCount,selectedSymbol:d.etf,checksPassed:3};
+  console.log(JSON.stringify(report));return report;
 }

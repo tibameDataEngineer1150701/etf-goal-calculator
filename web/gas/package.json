@@ -1,0 +1,11 @@
+{
+  "name": "etf-gas-v4-local-verification",
+  "private": true,
+  "scripts": {
+    "test:gas": "node tests/verify-gas.cjs",
+    "test:browser": "node tests/verify-browser.cjs"
+  },
+  "devDependencies": {
+    "playwright": "1.65.0"
+  }
+}

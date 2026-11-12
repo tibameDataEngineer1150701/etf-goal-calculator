@@ -1,0 +1,55 @@
+version: '3.8'
+# New stack only. No host ports, no new database grants, no crawler changes.
+services:
+  api_v4:
+    image: etf-web-api:4.0-test-20261112
+    environment:
+      MYSQL_HOST: mysql
+      MYSQL_USER: etf_web_readonly
+      MYSQL_PASSWORD_FILE: /run/secrets/etf_web_mysql_password_v1
+      API_TOKEN_FILE: /run/secrets/etf_web_api_token_v1
+      MAX_PRICE_AGE_DAYS: '14'
+      MAX_LIST_AGE_DAYS: '35'
+    secrets:
+      - source: etf_web_mysql_password_v1
+        uid: '10001'
+        gid: '10001'
+        mode: 0400
+      - source: etf_web_api_token_v2
+        target: etf_web_api_token_v1
+        uid: '10001'
+        gid: '10001'
+        mode: 0400
+    networks:
+      - database
+      - gateway
+    read_only: true
+    tmpfs:
+      - /tmp
+    healthcheck:
+      test: ['CMD', 'python', '-c', "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health/live', timeout=3)"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+    deploy:
+      replicas: 1
+      placement:
+        constraints: [node.hostname == etf-manager]
+      resources:
+        limits:
+          memory: 256M
+          cpus: '0.50'
+      restart_policy:
+        condition: on-failure
+secrets:
+  etf_web_mysql_password_v1:
+    external: true
+  etf_web_api_token_v2:
+    external: true
+networks:
+  database:
+    external: true
+    name: etf_etf
+  gateway:
+    external: true
+    name: etf-web_web_private
