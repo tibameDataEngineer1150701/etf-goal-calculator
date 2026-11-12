@@ -192,10 +192,6 @@ Housing pipeline:
 
 Local environment variables are listed at the top of `crawlers/etf/goal_calculator.py`. Common ones are `MYSQL_HOST`, `PRIMARY_ETF` (default `0050`), `INVEST_YEARS` (default `10`), and `MONTHLY_INVEST`. Production hosts are in the `PRODUCTION` section of `crawlers/etf/local.ini.example`. Do not commit real passwords.
 
-## Still open
-
-- The architecture drawing lives in this README as Mermaid. A separate image file has not been uploaded.
-
 ## Project issues
 
 1. Data Ingestion
