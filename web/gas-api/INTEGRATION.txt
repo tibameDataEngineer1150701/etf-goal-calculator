@@ -1,0 +1,65 @@
+GAS HTTPS API 版納入說明
+日期：2026-11-12
+
+一、這次納入什麼
+本資料夾保存 ETF 購屋試算的 GAS HTTPS API 版本，供團隊檢視與版本管理。
+包含 Code.gs、Index.html、appsscript.json；三個檔案必須配套使用。
+本次僅新增 web/gas-api/，沒有取代 web/gas/、修改主 README、變更排程或部署線上服務。
+依使用者轉述，Mark 已確認原 web/gas/ 是之前的測試版本；仍保留，待團隊決定是否退役。
+本次不重複搬入 ETF 清單爬蟲，也不納入 API 後端或 VM 部署腳本。
+
+二、與原 web/gas/ 的差別
+原版本：GAS 透過 JDBC 連 MySQL。
+本版本：使用者瀏覽器 → GAS 伺服器 → HTTPS API → 團隊資料庫。
+GAS 只發送 GET /v1/snapshot，使用 Bearer Token；HTML 不含 API Token。
+這不是單純換介面，資料契約與計算方法也不同，不能混用兩個資料夾的檔案。
+本版本按有效年報酬換算月報酬，按同一年限計算資產及房價目標，年限為 1～30 年。
+歷史 ETF CAGR 按各 ETF 價格端點與實際日數重算，不沿用舊 etf_cagr。
+固定面積 30 坪、初始資產 0、每月底投入；不包含貸款審核、稅費或達標機率。
+目前對接的原型 API 以 0050、0056、006208 為範圍，不代表完整 ETF 清單。
+顯示差額使用已取整資產與目標相減；是否達標仍以未取整金額判定。
+資料、假設與限制保留在「查看資料與試算說明」收合區。
+
+三、設定與權限
+API_BASE_URL 與 API_TOKEN 只在 Apps Script「專案設定 → 指令碼屬性」設定。
+API_BASE_URL：HTTPS 來源網址，可使用有有效憑證的網域或 IP；不要加 /v1/snapshot。
+API_TOKEN：由 API 管理者透過安全管道提供，程式要求至少 32 個字元。
+不要把實際 Token、密碼、憑證、.env 或部署帳號金鑰寫入 GitHub、PR 或截圖。
+appsscript.json 僅要求 script.external_request，沒有設定公開存取。
+實際網頁部署身分與誰可以存取，須在 Apps Script 部署設定另外確認。
+只上傳 GitHub 不會更新既有 GAS 網址；本 PR 沒有加入自動部署設定。
+合併前仍須由管理員確認 Repo 外部 webhook 或 Cloud Build 等整合，不能只靠沒有 GitHub Actions 判定。
+
+四、API 相依條件
+本資料夾不是獨立可啟動的後端服務，必須先有符合契約的 HTTPS API。
+預期 HTTP 200 JSON：{ "mode": "LIVE", "snapshot": { ... } }。
+snapshot 必須包含：
+- schemaVersion：1；id：mysql- 加上 24 位十六進位識別碼。
+- queriedAt：可解析的讀取時間；capturedDate、priceStart、priceEnd：YYYY-MM-DD。
+- housePeriod、hpiPeriod、hpi5Period、hpi10Period：YYYYQn。
+- houses：六都各一筆，欄位 city、existing、presale、existingCount、presaleCount、hpi、hpi5、hpi10。
+- etfs：symbol、name、first、last、observations、priceStart、priceEnd。
+完整驗證規則以 Code.gs 的 validateSnapshot_ 與 validateLiveSnapshot_ 為準。
+TLS 驗證開啟、不追蹤重新導向；讀取失敗、過期或資料版本不同會停止，不會偷偷改用假資料。
+GAS 快取最長 300 秒；前端選項與試算綁定同一份 snapshotId。
+目前 API 是否可用、憑證是否續期與資料是否最新，不由這次上傳保證。
+
+五、驗證紀錄與限制
+2026-11-12 對本次來源執行既有本機 verify-gas.cjs：
+- 9 組檢查通過，包含 HTTPS 呼叫設定、版本綁定、錯誤回應、過期資料、零／負報酬與輸入邊界。
+- 432 組計算與既有 v2 基準比較通過；另有逐月本金／報酬計算的獨立核對。
+- GAS 與 HTML 內嵌 JavaScript 語法檢查通過。
+這些是模擬 GAS／HTTP 的本機測試，不是本日 GCP、MySQL 或正式 GAS 網頁測試。
+測試工具與本機歷史基準不在本次四個檔案中；本段是驗證紀錄，不是可在此資料夾直接執行的測試套件。
+三個來源檔已檢查，未發現硬編碼 Token、資料庫密碼、私鑰或實際 API 網址。
+檢查不等同完整資安稽核；不應把「本機測試通過」視為雲端上線或來源資料核對完成。
+
+六、團隊接手順序
+1. 檢視本 PR，確認新版與舊測試版的用途及計算口徑。
+2. 與 API 管理者確認服務、資料契約、權限與憑證。
+3. 另行確認部署範圍，再備份目標 Apps Script 的現有來源及部署版本。
+4. 配套匯入三個來源檔，透過安全管道設定指令碼屬性。
+5. 執行 runLiveChecks，並檢查實際網頁正常、錯誤與邊界情境。
+6. 確認線上結果及存取權限後，再決定是否取代舊測試版；保留可回復的舊部署版本。
+
+此變更不會建立或啟用 Airflow DAG，也不會更新 ETF 清單或股價資料。
